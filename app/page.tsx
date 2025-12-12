@@ -222,7 +222,7 @@ export default function Home() {
     const svc = directionsServiceRef.current
     const rdr = directionsRendererRef.current
     if (!map || !svc || !rdr || !pickup || !destination) {
-      if (rdr) rdr.setDirections({ routes: [] } as google.maps.DirectionsResult)
+      if (rdr) rdr.setDirections({ routes: [] } as any)
       if (destMarkerRef.current) { destMarkerRef.current.setMap(null); destMarkerRef.current = null }
       routePathRef.current = []
       return
@@ -402,7 +402,7 @@ export default function Home() {
   const handleFinishRide = () => {
     setScreen('home'); setDestination(null); setDestinationInput(''); setCurrentRideId(null); setTipAmount(0); setRideTimer(0); setLiveETA('')
     setQuietRide(false); setPetFriendly(false); setCarSeatNeeded(false); setIsScheduled(false); setScheduledTime('')
-    if (directionsRendererRef.current) directionsRendererRef.current.setDirections({ routes: [] } as google.maps.DirectionsResult)
+    if (directionsRendererRef.current) directionsRendererRef.current.setDirections({ routes: [] } as any)
     if (carMarkerRef.current) { carMarkerRef.current.setMap(null); carMarkerRef.current = null }
     if (destMarkerRef.current) { destMarkerRef.current.setMap(null); destMarkerRef.current = null }
     routePathRef.current = []
