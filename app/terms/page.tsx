@@ -9,7 +9,7 @@ export default function Terms() {
       <div className="p-4 text-slate-300 space-y-6">
         <section>
           <h2 className="text-xl font-bold text-white mb-3">Inoka Terms of Service</h2>
-          <p className="text-slate-400 text-sm mb-4">Last updated: December 2024</p>
+          <p className="text-slate-400 text-sm mb-4">Last updated: December 2025</p>
           <p>Welcome to Inoka. By using our rideshare service, you agree to these terms.</p>
         </section>
 

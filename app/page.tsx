@@ -80,6 +80,13 @@ export default function Home() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searchError, setSearchError] = useState('')
   
+  // Ride preferences
+  const [quietRide, setQuietRide] = useState(false)
+  const [petFriendly, setPetFriendly] = useState(false)
+  const [carSeatNeeded, setCarSeatNeeded] = useState(false)
+  const [isScheduled, setIsScheduled] = useState(false)
+  const [scheduledTime, setScheduledTime] = useState('')
+  
   // Payment state
   const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null)
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
@@ -722,10 +729,10 @@ export default function Home() {
 
   // Header Component
   const Header = () => (
-    <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between relative">
+    <header className="glass border-b border-slate-700/50 px-4 py-3 flex items-center justify-between relative">
       <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-bold text-white tracking-tight">
-          IN<span className="text-amber-400">O</span>KA
+        <h1 className="text-2xl font-black text-white tracking-tighter">
+          IN<span className="text-amber-400 text-shadow-amber drop-shadow-lg">O</span>KA
         </h1>
         <span className="text-slate-500 text-xs hidden sm:block">Springfield, IL</span>
       </div>
@@ -738,7 +745,7 @@ export default function Home() {
             </span>
             <button
               onClick={() => setShowMenu(!showMenu)}
-              className="w-10 h-10 bg-slate-800 hover:bg-slate-700 rounded-full flex items-center justify-center border border-slate-700 transition-colors"
+              className="w-10 h-10 glass hover:bg-slate-700/50 rounded-full flex items-center justify-center border border-slate-700 transition-colors"
             >
               <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -748,7 +755,7 @@ export default function Home() {
         ) : (
           <button
             onClick={() => setScreen('auth')}
-            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 rounded-full text-sm font-medium text-white transition-colors"
+            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 rounded-full text-sm font-bold text-white transition-colors shadow-lg shadow-amber-500/20"
           >
             Sign In
           </button>
@@ -756,19 +763,19 @@ export default function Home() {
       </div>
       
       {showMenu && user && (
-        <div className="absolute top-16 right-4 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 overflow-hidden min-w-[200px]">
+        <div className="absolute top-16 right-4 glass border border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden min-w-[200px] animate-slide-down">
           <div className="p-4 border-b border-slate-700">
             <p className="text-white font-medium">{user.user_metadata?.full_name || 'User'}</p>
             <p className="text-slate-400 text-sm truncate">{user.email}</p>
           </div>
           <nav className="py-2">
-            <a href="/payment-methods" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700 transition-colors">
+            <a href="/payment-methods" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700/50 transition-colors">
               <span>💳</span><span>Payment Methods</span>
             </a>
-            <a href="/driver" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700 transition-colors">
+            <a href="/driver" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700/50 transition-colors">
               <span>🚗</span><span>Drive with Inoka</span>
             </a>
-            <a href="/terms" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700 transition-colors">
+            <a href="/terms" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700/50 transition-colors">
               <span>📄</span><span>Terms of Service</span>
             </a>
             <a href="/privacy" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700 transition-colors">
@@ -1061,32 +1068,41 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col">
         <Header />
-        <div className="flex-1 flex flex-col items-center justify-center p-6">
-          <div className="w-24 h-24 bg-amber-500 rounded-full flex items-center justify-center mb-6"><span className="text-5xl">✓</span></div>
+        <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in">
+          <div className="w-24 h-24 bg-gradient-to-br from-amber-400 to-amber-600 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-amber-500/30 animate-pulse-ring">
+            <span className="text-5xl">✓</span>
+          </div>
           
-          <h2 className="text-2xl font-bold text-white mb-2">Ride Complete!</h2>
-          <p className="text-slate-400 mb-6">Thanks for riding with Inoka</p>
+          <h2 className="text-3xl font-black text-white mb-2">Ride Complete!</h2>
+          <p className="text-slate-400 mb-8">Thanks for riding with Inoka</p>
           
-          <div className="w-full max-w-sm bg-slate-800 rounded-2xl p-6 mb-6">
-            <div className="flex justify-between items-center mb-4 pb-4 border-b border-slate-700">
-              <span className="text-slate-400">Ride Fare</span>
-              <span className="text-white font-semibold">${rideFare.toFixed(2)}</span>
+          <div className="w-full max-w-sm glass rounded-2xl p-6 mb-6">
+            {/* Large fare display */}
+            <div className="text-center mb-6">
+              <p className="text-slate-400 text-sm mb-1">Ride Fare</p>
+              <p className="text-5xl font-black text-amber-400 text-shadow-amber">${rideFare.toFixed(2)}</p>
             </div>
             
-            <p className="text-slate-400 text-sm mb-3">Add a tip for {driverInfo.name}</p>
-            <div className="flex gap-2 mb-4">
-              {[0, 2, 5, 10].map(tip => (
-                <button key={tip} onClick={() => handleAddTip(tip)} className={`flex-1 py-3 rounded-xl font-medium transition-all ${tipAmount === tip ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>{tip === 0 ? 'No Tip' : `$${tip}`}</button>
-              ))}
+            <div className="border-t border-slate-700 pt-4 mb-4">
+              <p className="text-slate-400 text-sm mb-3">Add a tip for {driverInfo.name}</p>
+              <div className="flex gap-2">
+                {[0, 2, 5, 10].map(tip => (
+                  <button key={tip} onClick={() => handleAddTip(tip)} className={`flex-1 py-3 rounded-xl font-bold transition-all ${tipAmount === tip ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
+                    {tip === 0 ? 'None' : `$${tip}`}
+                  </button>
+                ))}
+              </div>
             </div>
             
             <div className="flex justify-between items-center pt-4 border-t border-slate-700">
               <span className="text-white font-semibold">Total</span>
-              <span className="text-amber-400 font-bold text-xl">${(rideFare + tipAmount).toFixed(2)}</span>
+              <span className="text-amber-400 font-black text-2xl">${(rideFare + tipAmount).toFixed(2)}</span>
             </div>
           </div>
           
-          <button onClick={handleFinishRide} className="w-full max-w-sm py-4 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-xl transition-all">Done</button>
+          <button onClick={handleFinishRide} className="w-full max-w-sm py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">
+            Done
+          </button>
         </div>
       </div>
     )
@@ -1108,7 +1124,7 @@ export default function Home() {
         )}
       </div>
 
-      <div className="bg-slate-800 border-t border-slate-700 rounded-t-3xl">
+      <div className="glass border-t border-slate-700/50 rounded-t-3xl">
         {screen === 'home' && (
           <div className="p-4">
             <div className="mb-4">
@@ -1224,7 +1240,7 @@ export default function Home() {
         )}
 
         {screen === 'request' && (
-          <div className="p-4">
+          <div className="p-4 animate-slide-up">
             <div className="flex items-center justify-between mb-4">
               <button onClick={() => setScreen('home')} className="text-slate-400 hover:text-white">← Back</button>
               <p className="text-white font-medium">Choose a ride</p>
@@ -1232,7 +1248,7 @@ export default function Home() {
             </div>
 
             {paymentMethods.length > 0 && (
-              <div className="bg-slate-700/50 rounded-xl p-3 mb-4 flex items-center justify-between">
+              <div className="glass rounded-xl p-3 mb-4 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span>💳</span>
                   <span className="text-white text-sm">{paymentMethods[0].brand} •••• {paymentMethods[0].last4}</span>
@@ -1241,7 +1257,8 @@ export default function Home() {
               </div>
             )}
             
-            <div className="space-y-3 mb-4 max-h-64 overflow-y-auto">
+            {/* Ride Options */}
+            <div className="space-y-3 mb-4 max-h-56 overflow-y-auto hide-scrollbar">
               {RIDE_OPTIONS.map(option => (
                 <button key={option.id} onClick={() => setSelectedRide(option.id)} className={`w-full p-4 rounded-xl border-2 transition-all flex items-center gap-4 ${selectedRide === option.id ? 'border-amber-500 bg-amber-500/10' : 'border-slate-700 bg-slate-700/50 hover:border-slate-600'}`}>
                   <div className="text-3xl">{option.icon}</div>
@@ -1256,23 +1273,134 @@ export default function Home() {
               ))}
             </div>
             
-            <button onClick={handleRequestRide} className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-xl transition-all">Request Inoka</button>
+            {/* Ride Preferences */}
+            <div className="glass rounded-xl p-4 mb-4 space-y-3">
+              <p className="text-slate-400 text-xs uppercase tracking-wider mb-2">Ride Preferences</p>
+              
+              <label className="flex items-center justify-between cursor-pointer">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🤫</span>
+                  <span className="text-white text-sm">Quiet ride preferred</span>
+                </div>
+                <input 
+                  type="checkbox" 
+                  checked={quietRide} 
+                  onChange={(e) => setQuietRide(e.target.checked)}
+                  className="w-5 h-5 rounded bg-slate-700 border-slate-600"
+                />
+              </label>
+              
+              <label className="flex items-center justify-between cursor-pointer">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🐕</span>
+                  <span className="text-white text-sm">Pet-friendly</span>
+                </div>
+                <input 
+                  type="checkbox" 
+                  checked={petFriendly} 
+                  onChange={(e) => setPetFriendly(e.target.checked)}
+                  className="w-5 h-5 rounded bg-slate-700 border-slate-600"
+                />
+              </label>
+              
+              <label className="flex items-center justify-between cursor-pointer">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">👶</span>
+                  <span className="text-white text-sm">Car seat needed</span>
+                </div>
+                <input 
+                  type="checkbox" 
+                  checked={carSeatNeeded} 
+                  onChange={(e) => setCarSeatNeeded(e.target.checked)}
+                  className="w-5 h-5 rounded bg-slate-700 border-slate-600"
+                />
+              </label>
+            </div>
+            
+            {/* Schedule Ride */}
+            <div className="glass rounded-xl p-4 mb-4">
+              <label className="flex items-center justify-between cursor-pointer mb-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">📅</span>
+                  <span className="text-white text-sm">Schedule for later</span>
+                </div>
+                <input 
+                  type="checkbox" 
+                  checked={isScheduled} 
+                  onChange={(e) => setIsScheduled(e.target.checked)}
+                  className="w-5 h-5 rounded bg-slate-700 border-slate-600"
+                />
+              </label>
+              
+              {isScheduled && (
+                <input 
+                  type="datetime-local"
+                  value={scheduledTime}
+                  onChange={(e) => setScheduledTime(e.target.value)}
+                  min={new Date().toISOString().slice(0, 16)}
+                  className="w-full bg-slate-700 text-white px-4 py-3 rounded-xl border border-slate-600 focus:border-amber-500 focus:outline-none"
+                />
+              )}
+            </div>
+            
+            <button onClick={handleRequestRide} className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">
+              {isScheduled ? 'Schedule Inoka' : 'Request Inoka'}
+            </button>
           </div>
         )}
 
         {screen === 'searching' && (
-          <div className="p-6 text-center">
-            <div className="w-20 h-20 mx-auto mb-4 relative">
-              <div className="absolute inset-0 border-4 border-amber-500/30 rounded-full"></div>
-              <div className="absolute inset-0 border-4 border-amber-500 rounded-full animate-spin" style={{ borderTopColor: 'transparent', borderRightColor: 'transparent' }}></div>
-              <div className="absolute inset-0 flex items-center justify-center"><span className="text-2xl">🚗</span></div>
+          <div className="p-6 text-center animate-slide-up">
+            {/* Animated Driver Search */}
+            <div className="relative w-32 h-32 mx-auto mb-6">
+              {/* Outer pulse rings */}
+              <div className="absolute inset-0 border-4 border-amber-500/20 rounded-full animate-ping" style={{ animationDuration: '2s' }}></div>
+              <div className="absolute inset-2 border-4 border-amber-500/30 rounded-full animate-ping" style={{ animationDuration: '2s', animationDelay: '0.5s' }}></div>
+              
+              {/* Center spinner */}
+              <div className="absolute inset-4 border-4 border-slate-700 rounded-full"></div>
+              <div className="absolute inset-4 border-4 border-amber-500 rounded-full animate-spin" style={{ borderTopColor: 'transparent', borderRightColor: 'transparent' }}></div>
+              
+              {/* Car icon */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-4xl animate-float">🚗</span>
+              </div>
             </div>
-            <h3 className="text-xl font-semibold text-white mb-2">Finding your driver...</h3>
-            <p className="text-slate-400 mb-4">Payment authorized: ${rideFare.toFixed(2)}</p>
-            <div className="w-full bg-slate-700 rounded-full h-2 mb-4">
-              <div className="bg-amber-500 h-2 rounded-full transition-all duration-300" style={{ width: `${searchProgress}%` }}></div>
+            
+            {/* Animated fake driver dots */}
+            <div className="relative h-16 mb-6">
+              {[...Array(5)].map((_, i) => (
+                <div
+                  key={i}
+                  className="absolute w-8 h-8 bg-amber-500/60 rounded-full flex items-center justify-center text-sm animate-pulse"
+                  style={{
+                    left: `${15 + i * 18}%`,
+                    top: `${Math.sin(i) * 20 + 20}%`,
+                    animationDelay: `${i * 0.3}s`
+                  }}
+                >
+                  🚗
+                </div>
+              ))}
             </div>
-            <button onClick={() => { if (currentRideId) cancelRide(currentRideId); setScreen('home'); }} className="text-slate-400 hover:text-white transition-colors">Cancel Request</button>
+            
+            <h3 className="text-xl font-bold text-white mb-2">Finding the perfect driver...</h3>
+            <p className="text-slate-400 mb-1">Payment authorized: <span className="text-amber-400 font-semibold">${rideFare.toFixed(2)}</span></p>
+            
+            {/* Preferences reminder */}
+            <div className="flex justify-center gap-2 mb-4 text-slate-500 text-sm">
+              {quietRide && <span>🤫</span>}
+              {petFriendly && <span>🐕</span>}
+              {carSeatNeeded && <span>👶</span>}
+            </div>
+            
+            <div className="w-full bg-slate-700 rounded-full h-2 mb-6">
+              <div className="bg-gradient-to-r from-amber-500 to-amber-400 h-2 rounded-full transition-all duration-300" style={{ width: `${searchProgress}%` }}></div>
+            </div>
+            
+            <button onClick={() => { if (currentRideId) cancelRide(currentRideId); setScreen('home'); }} className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-colors">
+              Cancel Request
+            </button>
           </div>
         )}
 

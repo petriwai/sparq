@@ -9,7 +9,7 @@ export default function Privacy() {
       <div className="p-4 text-slate-300 space-y-6">
         <section>
           <h2 className="text-xl font-bold text-white mb-3">Inoka Privacy Policy</h2>
-          <p className="text-slate-400 text-sm mb-4">Last updated: December 2024</p>
+          <p className="text-slate-400 text-sm mb-4">Last updated: December 2025</p>
           <p>This policy describes how Inoka collects, uses, and protects your personal information.</p>
         </section>
 

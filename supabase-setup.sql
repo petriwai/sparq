@@ -90,6 +90,13 @@ create table if not exists public.rides (
   payment_intent_id text,
   payment_status text,
   paid_amount numeric,
+  -- New features
+  scheduled_for timestamptz null,
+  is_scheduled boolean default false,
+  quiet_ride boolean default false,
+  pet_friendly boolean default false,
+  car_seat_needed boolean default false,
+  -- Timestamps
   created_at timestamptz default now()
 );
 
@@ -148,3 +155,28 @@ create policy "vehicles_crud_own"
 on public.vehicles for all
 using (auth.uid() = driver_id)
 with check (auth.uid() = driver_id);
+
+-- ============================================================================
+-- SECURITY HARDENING: Column-Level Privileges
+-- ============================================================================
+-- Prevent users from updating payment fields directly
+-- Only the server (service role) can update payment_intent_id, payment_status, paid_amount
+
+-- Revoke general update, grant only specific columns
+revoke update on table public.rides from anon, authenticated;
+grant update (status) on table public.rides to authenticated;
+
+-- Prevent drivers from self-approving (only allow name/license updates)
+revoke update on table public.drivers from anon, authenticated;
+grant update (name, license_number) on table public.drivers to authenticated;
+
+-- ============================================================================
+-- MIGRATION: Add new columns to existing rides table
+-- ============================================================================
+-- Run these if upgrading an existing database:
+-- 
+-- alter table public.rides add column if not exists scheduled_for timestamptz null;
+-- alter table public.rides add column if not exists is_scheduled boolean default false;
+-- alter table public.rides add column if not exists quiet_ride boolean default false;
+-- alter table public.rides add column if not exists pet_friendly boolean default false;
+-- alter table public.rides add column if not exists car_seat_needed boolean default false;
