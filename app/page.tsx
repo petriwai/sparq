@@ -292,11 +292,40 @@ export default function Home() {
     if (!user) { setScreen('auth'); return }
     if (!selectedPaymentMethod || paymentMethods.length === 0) { setScreen('payment-required'); return }
     if (!destination || !pickup) return
+    
     const selectedOption = RIDE_OPTIONS.find(r => r.id === selectedRide)
     const fare = parseFloat(calculatePrice(estimatedDistance, selectedOption?.multiplier || 1))
     setRideFare(fare)
-    const ride = await createRideRequest(user.id, pickup.address, destination.address, selectedRide, fare)
+    
+    // Convert scheduled time to ISO format if scheduled
+    const scheduledForIso = isScheduled && scheduledTime ? new Date(scheduledTime).toISOString() : null
+    
+    // Create ride with all preferences
+    const ride = await createRideRequest({
+      rider_id: user.id,
+      pickup_address: pickup.address,
+      dropoff_address: destination.address,
+      ride_type: selectedRide,
+      estimated_fare: fare,
+      status: isScheduled ? 'scheduled' : 'requested',
+      scheduled_for: scheduledForIso,
+      is_scheduled: isScheduled,
+      quiet_ride: quietRide,
+      pet_friendly: petFriendly,
+      car_seat_needed: carSeatNeeded,
+    })
+    
     setCurrentRideId(ride.id)
+    
+    // Don't charge for scheduled rides yet - charge at dispatch time
+    if (isScheduled) {
+      setScreen('home')
+      setDestination(null)
+      setDestinationInput('')
+      // TODO: Show "Ride Scheduled" confirmation toast
+      return
+    }
+    
     const { status } = await stripeApi('create-payment-intent', { customerId: stripeCustomerId, amount: fare, rideId: ride.id, paymentMethodId: selectedPaymentMethod })
     if (status === 'requires_capture' || status === 'succeeded') { setScreen('searching'); simulateDriverSearch() }
     else setAuthError('Payment authorization failed.')
@@ -420,16 +449,19 @@ export default function Home() {
   }
 
   const Header = () => (
-    <header className="glass border-b border-slate-700/50 px-5 py-4 flex items-center justify-between relative z-50">
+    <header className="absolute top-0 left-0 right-0 z-30 pt-safe px-5 py-4 flex items-center justify-between">
+      {/* VIGNETTE GRADIENT FOR LEGIBILITY */}
+      <div className="absolute inset-0 bg-gradient-to-b from-slate-900/90 via-slate-900/50 to-transparent pointer-events-none h-32 -z-10"></div>
+      
       <div className="flex items-center gap-4">
-        <h1 className="text-3xl font-black text-white tracking-tighter">IN<span className="text-amber-400 drop-shadow-lg" style={{ textShadow: '0 0 20px rgba(245, 158, 11, 0.5)' }}>O</span>KA</h1>
-        <span className="text-slate-500 text-sm hidden sm:block">Springfield, IL</span>
+        <h1 className="text-3xl font-black text-white tracking-tighter text-shadow-sm">IN<span className="text-amber-400 drop-shadow-lg" style={{ textShadow: '0 0 20px rgba(245, 158, 11, 0.5)' }}>O</span>KA</h1>
+        <span className="text-slate-200 text-sm hidden sm:block font-medium text-shadow-sm">Springfield, IL</span>
       </div>
       <div className="flex items-center gap-2">
         {user ? (
           <>
-            <span className="text-slate-400 text-sm hidden sm:block">Hi, {getUserFirstName()}</span>
-            <button onClick={() => setShowMenu(!showMenu)} className="w-11 h-11 glass hover:bg-slate-700/50 rounded-2xl flex items-center justify-center border border-slate-700">
+            <span className="text-slate-200 text-sm hidden sm:block font-medium text-shadow-sm">Hi, {getUserFirstName()}</span>
+            <button onClick={() => setShowMenu(!showMenu)} className="w-11 h-11 glass hover:bg-slate-800/60 rounded-full flex items-center justify-center border border-white/10 backdrop-blur-md shadow-lg">
               <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
           </>
@@ -438,13 +470,13 @@ export default function Home() {
         )}
       </div>
       {showMenu && user && (
-        <div className="absolute top-full right-4 mt-2 glass border border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden min-w-[220px] animate-slide-down">
-          <div className="p-4 border-b border-slate-700"><p className="text-white font-medium">{user.user_metadata?.full_name || 'User'}</p><p className="text-slate-400 text-sm truncate">{user.email}</p></div>
+        <div className="absolute top-20 right-4 glass-card rounded-2xl z-50 overflow-hidden min-w-[220px] animate-slide-down">
+          <div className="p-4 border-b border-slate-700/50"><p className="text-white font-medium">{user.user_metadata?.full_name || 'User'}</p><p className="text-slate-400 text-sm truncate">{user.email}</p></div>
           <nav className="py-2">
-            <a href="/payment-methods" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700/50"><span>💳</span><span>Payment Methods</span></a>
-            <a href="/driver" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700/50"><span>🚗</span><span>Drive with Inoka</span></a>
-            <a href="/terms" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700/50"><span>📄</span><span>Terms of Service</span></a>
-            <button onClick={async () => { await supabase.auth.signOut(); setUser(null); setShowMenu(false) }} className="flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-slate-700/50 w-full text-left"><span>🚪</span><span>Sign Out</span></button>
+            <a href="/payment-methods" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700/50 transition-colors"><span>💳</span><span>Payment Methods</span></a>
+            <a href="/driver" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700/50 transition-colors"><span>🚗</span><span>Drive with Inoka</span></a>
+            <a href="/terms" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700/50 transition-colors"><span>📄</span><span>Terms of Service</span></a>
+            <button onClick={async () => { await supabase.auth.signOut(); setUser(null); setShowMenu(false) }} className="flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-slate-700/50 w-full text-left transition-colors"><span>🚪</span><span>Sign Out</span></button>
           </nav>
         </div>
       )}
@@ -456,70 +488,70 @@ export default function Home() {
       <button onClick={() => setScreen('home')} className="self-start text-slate-400 hover:text-white mb-8">← Back</button>
       <div className="flex-1 flex flex-col items-center justify-center">
         <div className="text-center mb-8"><h1 className="text-5xl font-black text-white mb-2">IN<span className="text-amber-400">O</span>KA</h1><p className="text-slate-400">The Real Ones</p></div>
-        <div className="w-full max-w-sm glass rounded-2xl p-6">
-          <div className="flex gap-1 mb-6 bg-slate-700/50 rounded-xl p-1">
-            <button onClick={() => { setAuthMode('signin'); setAuthError(''); setAuthSuccess('') }} className={`flex-1 py-2.5 rounded-lg font-medium text-sm ${authMode === 'signin' ? 'bg-amber-500 text-white' : 'text-slate-400'}`}>Sign In</button>
-            <button onClick={() => { setAuthMode('signup'); setAuthError(''); setAuthSuccess('') }} className={`flex-1 py-2.5 rounded-lg font-medium text-sm ${authMode === 'signup' ? 'bg-amber-500 text-white' : 'text-slate-400'}`}>Sign Up</button>
-            <button onClick={() => { setAuthMode('magic-link'); setAuthError(''); setAuthSuccess('') }} className={`flex-1 py-2.5 rounded-lg font-medium text-sm ${authMode === 'magic-link' ? 'bg-amber-500 text-white' : 'text-slate-400'}`}>Magic</button>
+        <div className="w-full max-w-sm glass-card rounded-2xl p-6">
+          <div className="flex gap-1 mb-6 bg-slate-800/50 rounded-xl p-1">
+            <button onClick={() => { setAuthMode('signin'); setAuthError(''); setAuthSuccess('') }} className={`flex-1 py-2.5 rounded-lg font-medium text-sm transition-all ${authMode === 'signin' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-400 hover:text-slate-300'}`}>Sign In</button>
+            <button onClick={() => { setAuthMode('signup'); setAuthError(''); setAuthSuccess('') }} className={`flex-1 py-2.5 rounded-lg font-medium text-sm transition-all ${authMode === 'signup' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-400 hover:text-slate-300'}`}>Sign Up</button>
+            <button onClick={() => { setAuthMode('magic-link'); setAuthError(''); setAuthSuccess('') }} className={`flex-1 py-2.5 rounded-lg font-medium text-sm transition-all ${authMode === 'magic-link' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-400 hover:text-slate-300'}`}>Magic</button>
           </div>
-          {authMode === 'signup' && <input type="text" placeholder="Full Name" value={authName} onChange={(e) => setAuthName(e.target.value)} className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-white placeholder-slate-400 mb-3 focus:outline-none focus:border-amber-500" />}
-          <input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-white placeholder-slate-400 mb-3 focus:outline-none focus:border-amber-500" />
-          {authMode !== 'magic-link' && <input type="password" placeholder="Password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-white placeholder-slate-400 mb-4 focus:outline-none focus:border-amber-500" />}
-          {authError && <p className="text-red-400 text-sm mb-4 bg-red-500/10 p-3 rounded-lg">{authError}</p>}
-          {authSuccess && <p className="text-green-400 text-sm mb-4 bg-green-500/10 p-3 rounded-lg">{authSuccess}</p>}
-          <button onClick={authMode === 'signin' ? handleSignIn : authMode === 'signup' ? handleSignUp : handleMagicLink} disabled={authLoading} className="w-full py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl disabled:opacity-50 shadow-lg shadow-amber-500/20">{authLoading ? 'Loading...' : authMode === 'signin' ? 'Sign In' : authMode === 'signup' ? 'Create Account' : 'Send Magic Link'}</button>
-          {authMode === 'signin' && <button onClick={() => setScreen('forgot-password')} className="mt-4 text-amber-400 text-sm w-full text-center">Forgot password?</button>}
+          {authMode === 'signup' && <input type="text" placeholder="Full Name" value={authName} onChange={(e) => setAuthName(e.target.value)} className="w-full px-4 py-3 bg-slate-700/80 border border-slate-600/50 rounded-xl text-white placeholder-slate-400 mb-3 focus:outline-none focus:border-amber-500 transition-colors" />}
+          <input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} className="w-full px-4 py-3 bg-slate-700/80 border border-slate-600/50 rounded-xl text-white placeholder-slate-400 mb-3 focus:outline-none focus:border-amber-500 transition-colors" />
+          {authMode !== 'magic-link' && <input type="password" placeholder="Password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} className="w-full px-4 py-3 bg-slate-700/80 border border-slate-600/50 rounded-xl text-white placeholder-slate-400 mb-4 focus:outline-none focus:border-amber-500 transition-colors" />}
+          {authError && <p className="text-red-400 text-sm mb-4 bg-red-500/10 p-3 rounded-lg border border-red-500/20">{authError}</p>}
+          {authSuccess && <p className="text-green-400 text-sm mb-4 bg-green-500/10 p-3 rounded-lg border border-green-500/20">{authSuccess}</p>}
+          <button onClick={authMode === 'signin' ? handleSignIn : authMode === 'signup' ? handleSignUp : handleMagicLink} disabled={authLoading} className="w-full py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl disabled:opacity-50 shadow-lg shadow-amber-500/20 transition-all active:scale-[0.98]">{authLoading ? 'Loading...' : authMode === 'signin' ? 'Sign In' : authMode === 'signup' ? 'Create Account' : 'Send Magic Link'}</button>
+          {authMode === 'signin' && <button onClick={() => setScreen('forgot-password')} className="mt-4 text-amber-400 hover:text-amber-300 text-sm w-full text-center transition-colors">Forgot password?</button>}
         </div>
       </div>
     </div>
   )
 
   if (screen === 'forgot-password') return (
-    <div className="min-h-screen bg-slate-900 flex flex-col p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-amber-900/30 flex flex-col p-6">
       <button onClick={() => setScreen('auth')} className="self-start text-slate-400 hover:text-white mb-8">← Back</button>
       <div className="flex-1 flex flex-col items-center justify-center">
-        <div className="w-full max-w-sm glass rounded-2xl p-6">
+        <div className="w-full max-w-sm glass-card rounded-2xl p-6">
           <h2 className="text-2xl font-bold text-white mb-2">Reset Password</h2>
           <p className="text-slate-400 text-sm mb-6">Enter your email to receive a reset link</p>
           <input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-white placeholder-slate-400 mb-4 focus:outline-none focus:border-amber-500" />
-          {authError && <p className="text-red-400 text-sm mb-4">{authError}</p>}
-          <button onClick={handleForgotPassword} disabled={authLoading} className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl disabled:opacity-50">{authLoading ? 'Sending...' : 'Send Reset Link'}</button>
+          {authError && <p className="text-red-400 text-sm mb-4 bg-red-500/10 p-3 rounded-lg">{authError}</p>}
+          <button onClick={handleForgotPassword} disabled={authLoading} className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl disabled:opacity-50 shadow-lg shadow-amber-500/20">{authLoading ? 'Sending...' : 'Send Reset Link'}</button>
         </div>
       </div>
     </div>
   )
 
   if (screen === 'magic-link-sent' || screen === 'reset-sent') return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6">
-      <div className="w-20 h-20 bg-amber-500 rounded-full flex items-center justify-center mb-6"><span className="text-4xl">✉️</span></div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-amber-900/30 flex flex-col items-center justify-center p-6">
+      <div className="w-20 h-20 bg-gradient-to-br from-amber-400 to-amber-600 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-amber-500/30"><span className="text-4xl">✉️</span></div>
       <h2 className="text-2xl font-bold text-white mb-2">Check Your Email</h2>
       <p className="text-slate-400 text-center mb-8">We've sent a {screen === 'magic-link-sent' ? 'magic link' : 'reset link'} to {authEmail}</p>
-      <button onClick={() => setScreen('auth')} className="text-amber-400 hover:text-amber-300">Back to Sign In</button>
+      <button onClick={() => setScreen('auth')} className="text-amber-400 hover:text-amber-300 font-medium">Back to Sign In</button>
     </div>
   )
 
   if (screen === 'payment-required') return (
     <div className="min-h-screen bg-slate-900 flex flex-col"><Header />
       <div className="flex-1 flex flex-col items-center justify-center p-6">
-        <div className="w-20 h-20 bg-amber-500/20 rounded-full flex items-center justify-center mb-6"><span className="text-4xl">💳</span></div>
+        <div className="w-20 h-20 bg-gradient-to-br from-amber-400/20 to-amber-600/20 rounded-full flex items-center justify-center mb-6 border border-amber-500/30"><span className="text-4xl">💳</span></div>
         <h2 className="text-2xl font-bold text-white mb-2">Payment Method Required</h2>
         <p className="text-slate-400 text-center mb-8">Add a payment method to request rides</p>
-        <a href="/payment-methods" className="px-8 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl">Add Payment Method</a>
+        <a href="/payment-methods" className="px-8 py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-lg shadow-amber-500/20">Add Payment Method</a>
         <button onClick={() => setScreen('home')} className="mt-4 text-slate-400 hover:text-white">Back</button>
       </div>
     </div>
   )
 
   if (screen === 'add-place') return (
-    <div className="min-h-screen bg-slate-900 flex flex-col p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-amber-900/30 flex flex-col p-6">
       <button onClick={() => setScreen('home')} className="self-start text-slate-400 hover:text-white mb-8">← Back</button>
       <div className="flex-1 flex flex-col items-center justify-center">
-        <div className="w-full max-w-sm glass rounded-2xl p-6">
-          <h2 className="text-2xl font-bold text-white mb-6">Save Place</h2>
-          <p className="text-slate-400 text-sm mb-4">{destination?.address}</p>
+        <div className="w-full max-w-sm glass-card rounded-2xl p-6">
+          <h2 className="text-2xl font-bold text-white mb-4">Save Place</h2>
+          <p className="text-slate-400 text-sm mb-6 truncate">{destination?.address}</p>
           <input type="text" placeholder="Label (e.g., Home, Work)" value={newPlaceLabel} onChange={(e) => setNewPlaceLabel(e.target.value)} className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-white placeholder-slate-400 mb-4 focus:outline-none focus:border-amber-500" />
-          <div className="flex gap-2 mb-6">{['🏠', '💼', '🏋️', '🛒', '❤️', '📍'].map(icon => (<button key={icon} onClick={() => setNewPlaceIcon(icon)} className={`w-12 h-12 rounded-xl text-xl flex items-center justify-center ${newPlaceIcon === icon ? 'bg-amber-500' : 'bg-slate-700 hover:bg-slate-600'}`}>{icon}</button>))}</div>
-          <button onClick={handleSavePlace} disabled={!newPlaceLabel.trim()} className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl disabled:opacity-50">Save Place</button>
+          <div className="flex gap-2 mb-6">{['🏠', '💼', '🏋️', '🛒', '❤️', '📍'].map(icon => (<button key={icon} onClick={() => setNewPlaceIcon(icon)} className={`w-12 h-12 rounded-xl text-xl flex items-center justify-center transition-all ${newPlaceIcon === icon ? 'bg-amber-500 shadow-lg shadow-amber-500/30' : 'bg-slate-700 hover:bg-slate-600'}`}>{icon}</button>))}</div>
+          <button onClick={handleSavePlace} disabled={!newPlaceLabel.trim()} className="w-full py-3.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl disabled:opacity-50 shadow-lg shadow-amber-500/20">Save Place</button>
         </div>
       </div>
     </div>
@@ -531,63 +563,68 @@ export default function Home() {
         <div className="w-24 h-24 bg-gradient-to-br from-amber-400 to-amber-600 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-amber-500/30 animate-pulse-ring"><span className="text-5xl">✓</span></div>
         <h2 className="text-3xl font-black text-white mb-2">Ride Complete!</h2>
         <p className="text-slate-400 mb-8">Thanks for riding with Inoka</p>
-        <div className="w-full max-w-sm glass rounded-2xl p-6 mb-6">
+        <div className="w-full max-w-sm glass-card rounded-2xl p-6 mb-6">
           <div className="text-center mb-6"><p className="text-slate-400 text-sm mb-1">Ride Fare</p><p className="text-5xl font-black text-amber-400" style={{ textShadow: '0 0 30px rgba(245, 158, 11, 0.4)' }}>${rideFare.toFixed(2)}</p></div>
-          <div className="border-t border-slate-700 pt-4 mb-4">
+          <div className="border-t border-slate-700/50 pt-4 mb-4">
             <p className="text-slate-400 text-sm mb-3">Add a tip for {driverInfo.name}</p>
-            <div className="flex gap-2">{[0, 2, 5, 10].map(tip => (<button key={tip} onClick={() => handleAddTip(tip)} className={`flex-1 py-3 rounded-xl font-bold ${tipAmount === tip ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>{tip === 0 ? 'None' : `$${tip}`}</button>))}</div>
+            <div className="flex gap-2">{[0, 2, 5, 10].map(tip => (<button key={tip} onClick={() => handleAddTip(tip)} className={`flex-1 py-3 rounded-xl font-bold transition-all ${tipAmount === tip ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>{tip === 0 ? 'None' : `$${tip}`}</button>))}</div>
           </div>
-          <div className="flex justify-between items-center pt-4 border-t border-slate-700"><span className="text-white font-semibold">Total</span><span className="text-amber-400 font-black text-2xl">${(rideFare + tipAmount).toFixed(2)}</span></div>
+          <div className="flex justify-between items-center pt-4 border-t border-slate-700/50"><span className="text-white font-semibold">Total</span><span className="text-amber-400 font-black text-2xl">${(rideFare + tipAmount).toFixed(2)}</span></div>
         </div>
-        <button onClick={handleFinishRide} className="w-full max-w-sm py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">Done</button>
+        <button onClick={handleFinishRide} className="w-full max-w-sm py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">Done</button>
       </div>
     </div>
   )
 
   return (
-    <div className="h-screen flex flex-col bg-slate-900 overflow-hidden">
+    <div className="h-screen flex flex-col bg-slate-900 overflow-hidden relative">
+      {/* Absolute Header Overlay */}
       <Header />
-      <div ref={mapRef} className="flex-1 relative">
+      
+      {/* MAP LAYER */}
+      <div ref={mapRef} className="flex-1 relative bg-slate-900">
         {!pickup && (<div className="absolute inset-0 flex items-center justify-center bg-slate-900 z-10"><div className="text-center"><div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div><p className="text-slate-400">Finding your location...</p></div></div>)}
       </div>
-      <div className="glass border-t border-slate-700/50 rounded-t-3xl relative z-20">
-        <div className="w-full flex justify-center pt-3 pb-1"><div className="w-12 h-1.5 bg-slate-700 rounded-full"></div></div>
+      
+      {/* BOTTOM SHEET */}
+      <div className="glass border-t border-slate-700/50 rounded-t-3xl absolute bottom-0 left-0 right-0 z-20 max-h-[80vh] overflow-y-auto">
+        <div className="w-full flex justify-center pt-3 pb-1"><div className="w-12 h-1.5 bg-slate-600/50 rounded-full"></div></div>
 
         {screen === 'home' && (
           <div className="p-5 pb-8">
-            <p className="text-slate-400 text-sm mb-3">Where are you going?</p>
-            <div className="relative mb-4">
-              <input type="text" placeholder="Enter destination" value={destinationInput} onChange={(e) => setDestinationInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchDestination()} className="w-full px-4 py-4 pl-12 pr-24 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 text-lg" />
-              <span className="absolute left-4 top-4 text-slate-400 text-xl">🔍</span>
+            <p className="text-slate-400 text-sm mb-3 font-medium ml-1">Where to?</p>
+            <div className="relative mb-4 group">
+              <input type="text" placeholder="Enter destination" value={destinationInput} onChange={(e) => setDestinationInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchDestination()} className="w-full px-4 py-4 pl-12 pr-24 bg-slate-800/80 border border-slate-600/50 rounded-2xl text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:bg-slate-800 text-lg shadow-inner transition-all" />
+              <span className="absolute left-4 top-4 text-slate-400 text-xl group-focus-within:text-amber-400 transition-colors">🔍</span>
               {destinationInput && <button onClick={() => { setDestinationInput(''); setDestination(null); setSearchResults([]); setSearchError('') }} className="absolute right-16 top-4 text-slate-400 hover:text-white p-1">✕</button>}
-              <button onClick={handleSearchDestination} disabled={isSearching} className="absolute right-2 top-2 bottom-2 w-12 bg-amber-500 hover:bg-amber-600 rounded-lg flex items-center justify-center text-white font-bold text-xl disabled:opacity-50">{isSearching ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : '→'}</button>
+              <button onClick={handleSearchDestination} disabled={isSearching} className="absolute right-2 top-2 bottom-2 w-12 bg-amber-500 hover:bg-amber-600 rounded-xl flex items-center justify-center text-white font-bold text-xl disabled:opacity-50 shadow-lg shadow-amber-500/20 transition-all active:scale-95">{isSearching ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : '→'}</button>
             </div>
             {searchError && <div className="mb-4 bg-red-900/30 border border-red-800 text-red-300 rounded-xl p-3 text-sm">⚠️ {searchError}</div>}
             {searchResults.length > 0 && (
-              <div className="mb-4 bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between"><p className="text-white font-semibold">Choose destination</p><button onClick={() => setSearchResults([])} className="text-slate-400 hover:text-white text-sm">Clear</button></div>
+              <div className="mb-4 bg-slate-800/80 border border-slate-700 rounded-2xl overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between bg-slate-800"><p className="text-white font-semibold">Choose destination</p><button onClick={() => setSearchResults([])} className="text-slate-400 hover:text-white text-sm">Clear</button></div>
                 <div className="max-h-64 overflow-y-auto">{searchResults.map((r, i) => (<button key={i} onClick={() => handleSelectLocation(r)} className="w-full text-left px-4 py-4 hover:bg-slate-700/60 border-b border-slate-700/50 last:border-b-0 flex items-center gap-3"><span className="text-xl">📍</span><div className="overflow-hidden"><p className="text-white font-medium truncate">{r.name || 'Location'}</p><p className="text-slate-400 text-sm truncate">{r.formatted_address}</p></div></button>))}</div>
               </div>
             )}
             {searchResults.length === 0 && (
-              <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
-                {getDisplayPlaces().map((item, index) => (<button key={`place-${index}`} className="flex-shrink-0 py-3 px-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-sm font-medium text-slate-300 flex items-center gap-2" onClick={() => { setDestination({ address: item.address, lat: item.lat, lng: item.lng }); setDestinationInput(item.address); setSearchResults([]); setSearchError('') }}><span>{item.icon}</span><span>{item.label}</span></button>))}
-                {user && destination && <button onClick={() => setScreen('add-place')} className="flex-shrink-0 py-3 px-4 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 rounded-xl text-sm font-medium text-amber-400 flex items-center gap-2"><span>➕</span><span>Save</span></button>}
+              <div className="flex gap-3 overflow-x-auto pb-4 hide-scrollbar">
+                {user && <button onClick={() => setScreen('add-place')} className="flex-shrink-0 px-5 py-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-400 font-medium active:scale-95 transition-transform">➕ Add</button>}
+                {getDisplayPlaces().map((item, index) => (<button key={`place-${index}`} className="flex-shrink-0 px-5 py-3 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 rounded-2xl text-sm font-medium text-slate-300 flex items-center gap-2 active:scale-95 transition-transform" onClick={() => { setDestination({ address: item.address, lat: item.lat, lng: item.lng }); setDestinationInput(item.address); setSearchResults([]); setSearchError('') }}><span>{item.icon}</span><span>{item.label}</span></button>))}
               </div>
             )}
             {destination && estimatedDistance > 0 && <div className="mt-4 p-4 bg-slate-800/50 border border-slate-700 rounded-xl"><div className="flex justify-between items-center text-sm"><span className="text-slate-400">Trip estimate</span><span className="text-white font-medium">{estimatedDistance.toFixed(1)} mi • ~{estimatedDuration || Math.ceil(estimatedDistance * 3)} min</span></div></div>}
-            {destination && <button onClick={() => setScreen('request')} className="w-full mt-4 py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-lg rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">Choose Ride</button>}
+            {destination && <button onClick={() => setScreen('request')} className="w-full mt-4 py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-lg rounded-2xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">Choose Ride</button>}
           </div>
         )}
 
         {screen === 'request' && (
           <div className="p-5 pb-8 animate-slide-up">
-            <div className="flex items-center justify-between mb-4"><button onClick={() => setScreen('home')} className="text-slate-400 hover:text-white">← Back</button><p className="text-white font-semibold">Choose a ride</p><div className="w-12"></div></div>
-            {paymentMethods.length > 0 && <div className="glass rounded-xl p-3 mb-4 flex items-center justify-between"><div className="flex items-center gap-2"><span>💳</span><span className="text-white text-sm">{paymentMethods[0].brand} •••• {paymentMethods[0].last4}</span></div><a href="/payment-methods" className="text-amber-400 text-sm font-medium">Change</a></div>}
-            <div className="space-y-3 mb-4 max-h-48 overflow-y-auto hide-scrollbar">{RIDE_OPTIONS.map(option => (<button key={option.id} onClick={() => setSelectedRide(option.id)} className={`w-full p-4 rounded-xl border-2 flex items-center gap-4 ${selectedRide === option.id ? 'border-amber-500 bg-amber-500/10' : 'border-slate-700 bg-slate-800 hover:border-slate-600'}`}><div className="text-3xl">{option.icon}</div><div className="flex-1 text-left"><p className="text-white font-semibold">{option.name}</p><p className="text-slate-400 text-sm">{option.description} • {option.eta} min</p></div><div className="text-right"><p className="text-white font-bold text-lg">${calculatePrice(estimatedDistance, option.multiplier)}</p></div></button>))}</div>
-            <div className="glass rounded-xl p-4 mb-4"><p className="text-slate-500 text-xs uppercase tracking-wider mb-3">Preferences</p><div className="flex flex-wrap gap-3"><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={quietRide} onChange={(e) => setQuietRide(e.target.checked)} className="w-4 h-4 rounded" /><span>🤫 Quiet</span></label><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={petFriendly} onChange={(e) => setPetFriendly(e.target.checked)} className="w-4 h-4 rounded" /><span>🐕 Pets</span></label><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={carSeatNeeded} onChange={(e) => setCarSeatNeeded(e.target.checked)} className="w-4 h-4 rounded" /><span>👶 Car Seat</span></label></div></div>
-            <div className="glass rounded-xl p-4 mb-4"><label className="flex items-center justify-between cursor-pointer"><div className="flex items-center gap-2"><span>📅</span><span className="text-white text-sm">Schedule for later</span></div><input type="checkbox" checked={isScheduled} onChange={(e) => setIsScheduled(e.target.checked)} className="w-5 h-5 rounded" /></label>{isScheduled && <input type="datetime-local" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} min={new Date().toISOString().slice(0, 16)} className="w-full mt-3 bg-slate-700 text-white px-4 py-3 rounded-xl border border-slate-600 focus:border-amber-500 focus:outline-none" />}</div>
-            <button onClick={handleRequestRide} className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-lg rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">{isScheduled ? 'Schedule Inoka' : 'Confirm Inoka'}</button>
+            <div className="flex items-center justify-between mb-4"><button onClick={() => setScreen('home')} className="text-slate-400 hover:text-white flex items-center gap-1">← Back</button><p className="text-white font-semibold">Choose a ride</p><div className="w-12"></div></div>
+            {paymentMethods.length > 0 && <div className="glass-card rounded-xl p-3 mb-4 flex items-center justify-between"><div className="flex items-center gap-2"><span>💳</span><span className="text-white text-sm">{paymentMethods[0].brand} •••• {paymentMethods[0].last4}</span></div><a href="/payment-methods" className="text-amber-400 text-sm font-medium">Change</a></div>}
+            <div className="space-y-3 mb-4 max-h-48 overflow-y-auto hide-scrollbar">{RIDE_OPTIONS.map(option => (<button key={option.id} onClick={() => setSelectedRide(option.id)} className={`w-full p-4 rounded-xl border-2 flex items-center gap-4 transition-all ${selectedRide === option.id ? 'border-amber-500 bg-amber-500/10 shadow-md shadow-amber-900/20' : 'border-slate-700 bg-slate-800/50 hover:bg-slate-700/50'}`}><div className="text-3xl">{option.icon}</div><div className="flex-1 text-left"><p className="text-white font-semibold">{option.name}</p><p className="text-slate-400 text-sm">{option.description} • {option.eta} min</p></div><div className="text-right"><p className="text-white font-bold text-lg">${calculatePrice(estimatedDistance, option.multiplier)}</p></div></button>))}</div>
+            <div className="glass-card rounded-xl p-4 mb-4"><p className="text-slate-500 text-xs uppercase tracking-wider mb-3">Preferences</p><div className="flex flex-wrap gap-3"><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={quietRide} onChange={(e) => setQuietRide(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" /><span>🤫 Quiet</span></label><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={petFriendly} onChange={(e) => setPetFriendly(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" /><span>🐕 Pets</span></label><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={carSeatNeeded} onChange={(e) => setCarSeatNeeded(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" /><span>👶 Car Seat</span></label></div></div>
+            <div className="glass-card rounded-xl p-4 mb-4"><label className="flex items-center justify-between cursor-pointer"><div className="flex items-center gap-2"><span>📅</span><span className="text-white text-sm">Schedule for later</span></div><input type="checkbox" checked={isScheduled} onChange={(e) => setIsScheduled(e.target.checked)} className="w-5 h-5 rounded accent-amber-500" /></label>{isScheduled && <input type="datetime-local" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} min={new Date().toISOString().slice(0, 16)} className="w-full mt-3 bg-slate-700 text-white px-4 py-3 rounded-xl border border-slate-600 focus:border-amber-500 focus:outline-none" />}</div>
+            <button onClick={handleRequestRide} className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-lg rounded-2xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">{isScheduled ? 'Schedule Inoka' : 'Confirm Inoka'}</button>
           </div>
         )}
 
@@ -600,32 +637,32 @@ export default function Home() {
               <div className="absolute inset-4 border-4 border-amber-500 rounded-full animate-spin" style={{ borderTopColor: 'transparent', borderRightColor: 'transparent' }}></div>
               <div className="absolute inset-0 flex items-center justify-center"><span className="text-4xl animate-float">🚗</span></div>
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">Finding the perfect driver...</h3>
+            <h3 className="text-xl font-bold text-white mb-2">Connecting you...</h3>
             <p className="text-slate-400 mb-1">Payment authorized: <span className="text-amber-400 font-semibold">${rideFare.toFixed(2)}</span></p>
             <div className="flex justify-center gap-2 mb-4 text-slate-500 text-sm">{quietRide && <span>🤫</span>}{petFriendly && <span>🐕</span>}{carSeatNeeded && <span>👶</span>}</div>
             <div className="w-full bg-slate-700 rounded-full h-2 mb-6"><div className="bg-gradient-to-r from-amber-500 to-amber-400 h-2 rounded-full transition-all duration-300" style={{ width: `${searchProgress}%` }}></div></div>
-            <button onClick={() => { if (currentRideId) cancelRide(currentRideId); setScreen('home') }} className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl">Cancel Request</button>
+            <button onClick={() => { if (currentRideId) cancelRide(currentRideId); setScreen('home') }} className="px-6 py-3 bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 rounded-xl">Cancel Request</button>
           </div>
         )}
 
         {screen === 'found' && (
           <div className="p-5 pb-8 animate-slide-up">
             <div className="text-center mb-4"><div className="inline-flex items-center gap-2 bg-amber-500/20 text-amber-400 px-4 py-2 rounded-full text-sm font-medium"><span className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></span>Driver on the way</div></div>
-            <div className="glass rounded-xl p-4 mb-4">
+            <div className="glass-card rounded-xl p-4 mb-4">
               <div className="flex items-center gap-4"><div className="w-16 h-16 bg-slate-700 rounded-full flex items-center justify-center text-3xl">{driverInfo.photo}</div><div className="flex-1"><p className="text-white font-semibold text-lg">{driverInfo.name}</p><div className="flex items-center gap-1 text-amber-400 text-sm"><span>⭐</span><span>{driverInfo.rating}</span></div></div><div className="text-right"><p className="text-3xl font-bold text-amber-400">{driverInfo.eta}</p><p className="text-slate-400 text-sm">min</p></div></div>
-              <div className="mt-4 pt-4 border-t border-slate-600"><p className="text-slate-400 text-sm">{driverInfo.car}</p><p className="text-white font-mono text-lg">{driverInfo.plate}</p></div>
+              <div className="mt-4 pt-4 border-t border-slate-600/50"><p className="text-slate-400 text-sm">{driverInfo.car}</p><p className="text-white font-mono text-lg">{driverInfo.plate}</p></div>
             </div>
-            <div className="flex gap-3 mb-4"><button className="flex-1 py-3 glass hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2 border border-slate-700"><span>📞</span> Call</button><button className="flex-1 py-3 glass hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2 border border-slate-700"><span>💬</span> Message</button></div>
-            <button onClick={handleStartRide} className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">Start Ride</button>
+            <div className="flex gap-3 mb-4"><button className="flex-1 py-3 glass-card hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2"><span>📞</span> Call</button><button className="flex-1 py-3 glass-card hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2"><span>💬</span> Message</button></div>
+            <button onClick={handleStartRide} className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">Start Ride</button>
           </div>
         )}
 
         {screen === 'in-ride' && (
-          <div className="p-5 pb-8 bg-gradient-to-t from-amber-500/10 to-transparent border-t-2 border-amber-500">
+          <div className="p-5 pb-8 bg-gradient-to-t from-amber-500/10 to-slate-900 border-t-2 border-amber-500">
             <div className="flex justify-between items-center mb-2"><span className="text-amber-400 font-bold tracking-wider text-sm uppercase">On Trip</span><span className="text-slate-400 text-sm">{formatTime(rideTimer)}</span></div>
             <div className="text-center mb-6"><p className="text-6xl font-black text-amber-400 tracking-tighter" style={{ textShadow: '0 0 30px rgba(245, 158, 11, 0.4)' }}>{liveETA || formatTime(rideTimer)}</p><p className="text-xl font-medium text-amber-300 mt-2">{liveETA && liveETA !== 'Arrived!' ? 'Until arrival' : liveETA === 'Arrived!' ? '🎉 You\'ve arrived!' : 'Ride time'}</p></div>
             <h3 className="text-white text-lg font-semibold mb-4">Heading to {destination?.address.split(',')[0]}</h3>
-            <button onClick={handleCompleteRide} className="w-full py-4 glass hover:bg-slate-700/50 text-white font-semibold rounded-xl border border-slate-700">Complete Ride (Demo)</button>
+            <button onClick={handleCompleteRide} className="w-full py-4 glass-card hover:bg-slate-700/50 text-white font-semibold rounded-xl">Complete Ride (Demo)</button>
           </div>
         )}
       </div>

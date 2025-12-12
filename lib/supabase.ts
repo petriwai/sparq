@@ -15,6 +15,12 @@ export async function createRideRequest(
     estimated_fare: number
     payment_intent_id?: string
     payment_status?: string
+    status?: string
+    scheduled_for?: string | null
+    is_scheduled?: boolean
+    quiet_ride?: boolean
+    pet_friendly?: boolean
+    car_seat_needed?: boolean
   },
   pickupAddress?: string,
   dropoffAddress?: string,
@@ -24,7 +30,10 @@ export async function createRideRequest(
   let rideData: any
   
   if (typeof riderIdOrOptions === 'object') {
-    rideData = riderIdOrOptions
+    rideData = {
+      ...riderIdOrOptions,
+      status: riderIdOrOptions.status || 'requested'
+    }
   } else {
     rideData = {
       rider_id: riderIdOrOptions,
