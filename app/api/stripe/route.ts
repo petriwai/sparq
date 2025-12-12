@@ -9,8 +9,11 @@ let stripeClient: Stripe | null = null
 let supabaseAdmin: SupabaseClient | null = null
 
 function getStripe() {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error('STRIPE_SECRET_KEY environment variable is not set')
+  }
   if (!stripeClient) {
-    stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY, {
       apiVersion: '2023-10-16'
     })
   }
@@ -18,10 +21,16 @@ function getStripe() {
 }
 
 function getSupabaseAdmin() {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL environment variable is not set')
+  }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY environment variable is not set')
+  }
   if (!supabaseAdmin) {
     supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
     )
   }
   return supabaseAdmin
@@ -36,13 +45,19 @@ async function getAuthenticatedUser(request: NextRequest) {
   
   const token = authHeader.replace('Bearer ', '')
   
-  const { data: { user }, error } = await getSupabaseAdmin().auth.getUser(token)
-  
-  if (error || !user) {
+  try {
+    const { data: { user }, error } = await getSupabaseAdmin().auth.getUser(token)
+    
+    if (error || !user) {
+      console.error('Auth error:', error?.message)
+      return null
+    }
+    
+    return user
+  } catch (error: any) {
+    console.error('Auth exception:', error.message)
     return null
   }
-  
-  return user
 }
 
 export async function POST(request: NextRequest) {
@@ -279,6 +294,12 @@ export async function POST(request: NextRequest) {
     }
   } catch (error: any) {
     console.error('Stripe API error:', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    // In development, return full error message; in production, be more careful
+    const isDev = process.env.NODE_ENV === 'development'
+    return NextResponse.json({ 
+      error: isDev ? error.message : 'Internal server error',
+      details: isDev ? error.stack : undefined,
+      code: error.code || 'UNKNOWN'
+    }, { status: 500 })
   }
 }

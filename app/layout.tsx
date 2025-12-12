@@ -28,8 +28,9 @@ export default function RootLayout({
       <body className="antialiased">
         {mapsKey && (
           <Script
-            src={`https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places,geometry&v=weekly`}
-            strategy="beforeInteractive"
+            src={`https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places,geometry&v=weekly&loading=async`}
+            strategy="afterInteractive"
+            async
           />
         )}
         <div className="w-full min-h-screen md:max-w-[430px] md:min-h-[932px] md:mx-auto md:my-0 md:rounded-[40px] md:shadow-2xl md:shadow-black/50 md:border md:border-slate-800 md:overflow-hidden relative bg-slate-900">

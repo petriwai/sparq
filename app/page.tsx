@@ -449,29 +449,35 @@ export default function Home() {
   }
 
   const Header = () => (
-    <header className="absolute top-0 left-0 right-0 z-30 pt-safe px-5 py-4 flex items-center justify-between">
-      {/* VIGNETTE GRADIENT FOR LEGIBILITY */}
-      <div className="absolute inset-0 bg-gradient-to-b from-slate-900/90 via-slate-900/50 to-transparent pointer-events-none h-32 -z-10"></div>
+    <header className="absolute top-0 left-0 right-0 z-30 pt-safe px-5 pt-6 pb-4 flex items-center justify-between">
+      {/* VIGNETTE GRADIENT FOR LEGIBILITY - taller gradient */}
+      <div className="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-900/80 to-transparent pointer-events-none h-40 -z-10"></div>
       
       <div className="flex items-center gap-4">
-        <h1 className="text-3xl font-black text-white tracking-tighter text-shadow-sm">IN<span className="text-amber-400 drop-shadow-lg" style={{ textShadow: '0 0 20px rgba(245, 158, 11, 0.5)' }}>O</span>KA</h1>
-        <span className="text-slate-200 text-sm hidden sm:block font-medium text-shadow-sm">Springfield, IL</span>
+        <h1 className="text-4xl font-black text-white tracking-tighter text-shadow-sm">IN<span className="text-amber-400 drop-shadow-lg" style={{ textShadow: '0 0 25px rgba(245, 158, 11, 0.6)' }}>O</span>KA</h1>
+        <div className="hidden sm:flex flex-col">
+          <span className="text-slate-200 text-sm font-semibold text-shadow-sm">Springfield, IL</span>
+          <span className="text-slate-400 text-xs">The Real Ones</span>
+        </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         {user ? (
           <>
-            <span className="text-slate-200 text-sm hidden sm:block font-medium text-shadow-sm">Hi, {getUserFirstName()}</span>
-            <button onClick={() => setShowMenu(!showMenu)} className="w-11 h-11 glass hover:bg-slate-800/60 rounded-full flex items-center justify-center border border-white/10 backdrop-blur-md shadow-lg">
+            <div className="hidden sm:flex flex-col items-end">
+              <span className="text-slate-200 text-sm font-medium text-shadow-sm">Hi, {getUserFirstName()}</span>
+              <span className="text-slate-400 text-xs">Welcome back</span>
+            </div>
+            <button onClick={() => setShowMenu(!showMenu)} className="w-12 h-12 glass hover:bg-slate-800/60 rounded-full flex items-center justify-center border border-white/10 backdrop-blur-md shadow-lg">
               <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16M4 18h16" /></svg>
             </button>
           </>
         ) : (
-          <button onClick={() => setScreen('auth')} className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 rounded-full text-sm font-bold text-white shadow-lg shadow-amber-500/20">Sign In</button>
+          <button onClick={() => setScreen('auth')} className="px-6 py-3 bg-amber-500 hover:bg-amber-600 rounded-full text-sm font-bold text-white shadow-lg shadow-amber-500/30">Sign In</button>
         )}
       </div>
       {showMenu && user && (
-        <div className="absolute top-20 right-4 glass-card rounded-2xl z-50 overflow-hidden min-w-[220px] animate-slide-down">
-          <div className="p-4 border-b border-slate-700/50"><p className="text-white font-medium">{user.user_metadata?.full_name || 'User'}</p><p className="text-slate-400 text-sm truncate">{user.email}</p></div>
+        <div className="absolute top-24 right-4 glass-card rounded-2xl z-50 overflow-hidden min-w-[240px] animate-slide-down">
+          <div className="p-4 border-b border-slate-700/50"><p className="text-white font-semibold">{user.user_metadata?.full_name || 'User'}</p><p className="text-slate-400 text-sm truncate">{user.email}</p></div>
           <nav className="py-2">
             <a href="/payment-methods" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700/50 transition-colors"><span>💳</span><span>Payment Methods</span></a>
             <a href="/driver" className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-700/50 transition-colors"><span>🚗</span><span>Drive with Inoka</span></a>
@@ -581,13 +587,13 @@ export default function Home() {
       {/* Absolute Header Overlay */}
       <Header />
       
-      {/* MAP LAYER */}
-      <div ref={mapRef} className="flex-1 relative bg-slate-900">
+      {/* MAP LAYER - with top padding to account for header */}
+      <div ref={mapRef} className="flex-1 relative bg-slate-900 pt-20">
         {!pickup && (<div className="absolute inset-0 flex items-center justify-center bg-slate-900 z-10"><div className="text-center"><div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div><p className="text-slate-400">Finding your location...</p></div></div>)}
       </div>
       
-      {/* BOTTOM SHEET */}
-      <div className="glass border-t border-slate-700/50 rounded-t-3xl absolute bottom-0 left-0 right-0 z-20 max-h-[80vh] overflow-y-auto">
+      {/* BOTTOM SHEET - taller to show less map */}
+      <div className="glass border-t border-slate-700/50 rounded-t-3xl absolute bottom-0 left-0 right-0 z-20 min-h-[45vh] max-h-[85vh] overflow-y-auto">
         <div className="w-full flex justify-center pt-3 pb-1"><div className="w-12 h-1.5 bg-slate-600/50 rounded-full"></div></div>
 
         {screen === 'home' && (

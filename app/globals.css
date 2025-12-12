@@ -69,7 +69,7 @@ body {
 
 /* Safe Area Spacing for Notches */
 .pt-safe {
-  padding-top: env(safe-area-inset-top, 20px);
+  padding-top: max(env(safe-area-inset-top, 12px), 12px);
 }
 
 .pb-safe {
