@@ -498,7 +498,7 @@ export default function Home() {
 
   const handleFinishRide = () => {
     setScreen('home'); setDestination(null); setDestinationInput(''); setCurrentRideId(null); setTipAmount(0); setRideTimer(0); setLiveETA('')
-    setQuietRide(false); setPetFriendly(false); setCarSeatNeeded(false); setIsScheduled(false); setScheduledTime('')
+    setQuietRide(false); setPetFriendly(false); setIsScheduled(false); setScheduledTime('')
     if (directionsRendererRef.current) directionsRendererRef.current.setDirections({ routes: [] } as unknown as google.maps.DirectionsResult)
     if (carMarkerRef.current) { carMarkerRef.current.setMap(null); carMarkerRef.current = null }
     if (destMarkerRef.current) { destMarkerRef.current.setMap(null); destMarkerRef.current = null }
