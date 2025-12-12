@@ -55,9 +55,10 @@ export default function RootLayout({
           `}
         </Script>
         
-        {/* Phone Frame for Desktop */}
-        <div className="w-full min-h-screen md:max-w-[430px] md:min-h-[932px] md:mx-auto md:my-0 md:rounded-[40px] md:shadow-2xl md:shadow-black/50 md:border md:border-slate-800 md:overflow-hidden relative bg-slate-900">
-          <div className="hidden md:block absolute top-0 left-1/2 -translate-x-1/2 w-[120px] h-[30px] bg-black rounded-b-2xl z-50"></div>
+        {/* Phone Frame for Desktop - with safe area variable */}
+        <div className="w-full min-h-screen md:max-w-[430px] md:min-h-[932px] md:mx-auto md:my-0 md:rounded-[40px] md:shadow-2xl md:shadow-black/50 md:border md:border-slate-800 md:overflow-hidden relative bg-slate-900 md:[--safe-top:44px]">
+          {/* Notch - pointer-events-none so it doesn't block clicks, z-40 below header */}
+          <div className="hidden md:block pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[120px] h-[30px] bg-black rounded-b-2xl z-40"></div>
           {children}
         </div>
       </body>

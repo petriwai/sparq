@@ -439,7 +439,7 @@ export default function DriverApp() {
   // Home Screen
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col">
-      <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+      <header className="pt-safe bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">IN<span className="text-amber-400">O</span>KA</h1>
           <p className="text-slate-500 text-xs">Driver</p>

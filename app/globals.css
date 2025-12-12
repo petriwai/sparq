@@ -67,9 +67,9 @@ body {
   border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
-/* Safe Area Spacing for Notches */
+/* Safe Area Spacing for Notches - uses CSS variable for desktop override */
 .pt-safe {
-  padding-top: max(env(safe-area-inset-top, 12px), 12px);
+  padding-top: calc(var(--safe-top, env(safe-area-inset-top, 20px)) + 12px);
 }
 
 .pb-safe {

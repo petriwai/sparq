@@ -1,7 +1,7 @@
 export default function Privacy() {
   return (
     <div className="min-h-screen bg-slate-900">
-      <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center gap-4">
+      <header className="pt-safe bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center gap-4">
         <a href="/" className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center text-white">←</a>
         <h1 className="text-lg font-semibold text-white">Privacy Policy</h1>
       </header>
