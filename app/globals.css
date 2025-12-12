@@ -167,3 +167,38 @@ input[type="checkbox"] {
 .text-shadow-amber {
   text-shadow: 0 0 20px rgba(245, 158, 11, 0.5);
 }
+
+/* Glowing pulse ring that follows the car */
+.car-glow-pulse {
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  background: radial-gradient(circle at center, #fbbf24 0%, transparent 65%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9998;
+  animation: carPulse 2.2s infinite ease-out;
+  transform: translate(-50%, -50%);
+}
+
+@keyframes carPulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.6);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.8);
+    opacity: 0;
+  }
+}
+
+/* Remove Google Maps clutter (what's legally removable) */
+.gm-style .gmnoprint,
+.gm-style .gm-style-cc {
+  display: none !important;
+}
+
+/* Hide keyboard shortcuts popup */
+.gm-style iframe + div {
+  display: none !important;
+}
