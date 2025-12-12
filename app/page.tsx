@@ -78,6 +78,7 @@ export default function Home() {
   const [showMenu, setShowMenu] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [searchError, setSearchError] = useState('')
   
   // Payment state
   const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null)
@@ -265,8 +266,9 @@ export default function Home() {
   }
 
   // Forward geocode via server API
-  const geocodeAddress = async (address: string): Promise<{ single?: { lat: number; lng: number; formatted_address: string; name?: string }; multiple?: SearchResult[] } | null> => {
+  const geocodeAddress = async (address: string): Promise<{ single?: { lat: number; lng: number; formatted_address: string; name?: string }; multiple?: SearchResult[]; error?: string } | null> => {
     try {
+      setSearchError('')
       console.log('Geocoding address:', address)
       const response = await fetch('/api/geocode', {
         method: 'POST',
@@ -279,23 +281,39 @@ export default function Home() {
       })
       const data = await response.json()
       console.log('Geocode response:', data)
-      if (data.success) {
-        if (data.multiple && data.results) {
-          return { multiple: data.results }
+      
+      if (!data.success) {
+        // Extract the most useful error message
+        const errorMsg = 
+          data.message ||
+          data.error ||
+          data.details?.places_error_message ||
+          data.details?.geocode_error_message ||
+          'Search failed'
+        
+        // Log detailed error info for debugging
+        if (data.details) {
+          console.error('Geocode error details:', data.details)
         }
-        return { 
-          single: { 
-            lat: data.lat, 
-            lng: data.lng, 
-            formatted_address: data.formatted_address,
-            name: data.name
-          } 
-        }
+        
+        return { error: errorMsg }
+      }
+      
+      if (data.multiple && data.results) {
+        return { multiple: data.results }
+      }
+      return { 
+        single: { 
+          lat: data.lat, 
+          lng: data.lng, 
+          formatted_address: data.formatted_address,
+          name: data.name
+        } 
       }
     } catch (err) {
       console.error('Geocoding error:', err)
+      return { error: 'Search request failed - check your connection' }
     }
-    return null
   }
 
   // Initialize map
@@ -402,27 +420,43 @@ export default function Home() {
     }
     
     setIsSearching(true)
+    setSearchResults([])
+    setSearchError('')
+    
     const result = await geocodeAddress(destinationInput)
     setIsSearching(false)
     
     console.log('Result returned:', result)
-    if (result) {
-      if (result.multiple) {
-        // Multiple results - show picker
-        setSearchResults(result.multiple)
-        setScreen('choose-location')
-      } else if (result.single) {
-        // Single result - use it directly
-        const displayAddress = result.single.name 
-          ? `${result.single.name}, ${result.single.formatted_address}`
-          : result.single.formatted_address
-        setDestination({ 
-          address: displayAddress, 
-          lat: result.single.lat, 
-          lng: result.single.lng 
-        })
-        setDestinationInput(displayAddress)
-      }
+    
+    if (!result) {
+      setSearchError('No results. Try a more specific search.')
+      return
+    }
+    
+    if (result.error) {
+      setSearchError(result.error)
+      return
+    }
+    
+    if (result.multiple && result.multiple.length > 0) {
+      // Multiple results - show inline in bottom sheet (stay on home screen)
+      setSearchResults(result.multiple)
+      // Don't change screen - results will show inline
+      return
+    }
+    
+    if (result.single) {
+      // Single result - use it directly
+      const displayAddress = result.single.name 
+        ? `${result.single.name}, ${result.single.formatted_address}`
+        : result.single.formatted_address
+      setDestination({ 
+        address: displayAddress, 
+        lat: result.single.lat, 
+        lng: result.single.lng 
+      })
+      setDestinationInput(displayAddress)
+      setSearchResults([])
     }
   }
 
@@ -1080,19 +1114,34 @@ export default function Home() {
             <div className="mb-4">
               <p className="text-slate-400 text-sm mb-2">Where are you going?</p>
               <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Enter destination"
-                  value={destinationInput}
-                  onChange={(e) => setDestinationInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      handleSearchDestination()
-                    }
-                  }}
-                  className="flex-1 px-4 py-3 bg-slate-700 border border-slate-600 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
-                />
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    placeholder="Enter destination"
+                    value={destinationInput}
+                    onChange={(e) => setDestinationInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        handleSearchDestination()
+                      }
+                    }}
+                    className="w-full px-4 py-3 pr-10 bg-slate-700 border border-slate-600 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
+                  />
+                  {destinationInput && (
+                    <button 
+                      onClick={() => { 
+                        setDestinationInput('')
+                        setDestination(null)
+                        setSearchResults([])
+                        setSearchError('')
+                      }} 
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -1107,26 +1156,66 @@ export default function Home() {
               </div>
             </div>
             
-            <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
-              {getDisplayPlaces().map((item, index) => (
-                <button
-                  key={`place-${index}`}
-                  className="flex-shrink-0 py-3 px-4 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-xl text-sm font-medium text-slate-300 flex items-center gap-2 transition-all"
-                  onClick={() => {
-                    setDestination({ address: item.address, lat: item.lat, lng: item.lng })
-                    setDestinationInput(item.address)
-                  }}
-                >
-                  <span>{item.icon}</span>
-                  <span>{item.label}</span>
-                </button>
-              ))}
-              {user && (
-                <button onClick={() => destination && setScreen('add-place')} className="flex-shrink-0 py-3 px-4 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 rounded-xl text-sm font-medium text-amber-400 flex items-center gap-2 transition-all">
-                  <span>➕</span><span>Add</span>
-                </button>
-              )}
-            </div>
+            {/* Search Error Display */}
+            {searchError && (
+              <div className="mb-4 bg-red-900/30 border border-red-800 text-red-300 rounded-xl p-3 text-sm">
+                ⚠️ {searchError}
+              </div>
+            )}
+            
+            {/* Inline Search Results */}
+            {searchResults.length > 0 && (
+              <div className="mb-4 bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                  <p className="text-white font-semibold">Choose a destination ({searchResults.length})</p>
+                  <button
+                    onClick={() => setSearchResults([])}
+                    className="text-slate-400 hover:text-white text-sm"
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                <div className="max-h-64 overflow-y-auto">
+                  {searchResults.map((r, i) => (
+                    <button
+                      key={i}
+                      onClick={() => handleSelectLocation(r)}
+                      className="w-full text-left px-4 py-4 hover:bg-slate-700/60 transition-colors border-b border-slate-700/50 last:border-b-0"
+                    >
+                      <p className="text-white font-medium truncate">{r.name || 'Location'}</p>
+                      <p className="text-slate-400 text-sm leading-snug truncate">{r.formatted_address}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Saved Places - only show when no search results */}
+            {searchResults.length === 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
+                {getDisplayPlaces().map((item, index) => (
+                  <button
+                    key={`place-${index}`}
+                    className="flex-shrink-0 py-3 px-4 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-xl text-sm font-medium text-slate-300 flex items-center gap-2 transition-all"
+                    onClick={() => {
+                      setDestination({ address: item.address, lat: item.lat, lng: item.lng })
+                      setDestinationInput(item.address)
+                      setSearchResults([])
+                      setSearchError('')
+                    }}
+                  >
+                    <span>{item.icon}</span>
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+                {user && (
+                  <button onClick={() => destination && setScreen('add-place')} className="flex-shrink-0 py-3 px-4 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 rounded-xl text-sm font-medium text-amber-400 flex items-center gap-2 transition-all">
+                    <span>➕</span><span>Add</span>
+                  </button>
+                )}
+              </div>
+            )}
             
             {destination && (
               <button onClick={() => setScreen('request')} className="w-full mt-4 py-4 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-xl transition-all">Continue</button>
