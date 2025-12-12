@@ -1,18 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 export const runtime = 'nodejs'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2023-10-16'
-})
+// Create clients lazily to avoid build-time errors
+let stripeClient: Stripe | null = null
+let supabaseAdmin: SupabaseClient | null = null
 
-// Service role client for database operations (bypasses RLS)
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+function getStripe() {
+  if (!stripeClient) {
+    stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+      apiVersion: '2023-10-16'
+    })
+  }
+  return stripeClient
+}
+
+function getSupabaseAdmin() {
+  if (!supabaseAdmin) {
+    supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+  }
+  return supabaseAdmin
+}
 
 // Helper to verify session and get user
 async function getAuthenticatedUser(request: NextRequest) {
@@ -23,7 +36,7 @@ async function getAuthenticatedUser(request: NextRequest) {
   
   const token = authHeader.replace('Bearer ', '')
   
-  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token)
+  const { data: { user }, error } = await getSupabaseAdmin().auth.getUser(token)
   
   if (error || !user) {
     return null
@@ -36,6 +49,9 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { action } = body
+    
+    const stripe = getStripe()
+    const supabase = getSupabaseAdmin()
 
     // Actions that require authentication
     const authRequiredActions = [
@@ -62,7 +78,7 @@ export async function POST(request: NextRequest) {
         
         const customer = await stripe.customers.create({ email: user.email })
         
-        await supabaseAdmin
+        await supabase
           .from('profiles')
           .update({ stripe_customer_id: customer.id })
           .eq('id', user.id)
@@ -74,7 +90,7 @@ export async function POST(request: NextRequest) {
         if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         
         // Get customer ID from database, not from request
-        const { data: profile } = await supabaseAdmin
+        const { data: profile } = await supabase
           .from('profiles')
           .select('stripe_customer_id')
           .eq('id', user.id)
@@ -95,7 +111,7 @@ export async function POST(request: NextRequest) {
         if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         
         // Get customer ID from database, not from request
-        const { data: profile } = await supabaseAdmin
+        const { data: profile } = await supabase
           .from('profiles')
           .select('stripe_customer_id')
           .eq('id', user.id)
@@ -124,7 +140,7 @@ export async function POST(request: NextRequest) {
         const { paymentMethodId } = body
         
         // Verify the payment method belongs to this user
-        const { data: profile } = await supabaseAdmin
+        const { data: profile } = await supabase
           .from('profiles')
           .select('stripe_customer_id')
           .eq('id', user.id)
@@ -150,7 +166,7 @@ export async function POST(request: NextRequest) {
         const { amount, rideId, paymentMethodId } = body
         
         // Get customer ID from database
-        const { data: profile } = await supabaseAdmin
+        const { data: profile } = await supabase
           .from('profiles')
           .select('stripe_customer_id')
           .eq('id', user.id)
@@ -161,7 +177,7 @@ export async function POST(request: NextRequest) {
         }
         
         // Verify the ride belongs to this user
-        const { data: ride } = await supabaseAdmin
+        const { data: ride } = await supabase
           .from('rides')
           .select('id, rider_id')
           .eq('id', rideId)
@@ -181,7 +197,7 @@ export async function POST(request: NextRequest) {
           return_url: `${process.env.NEXT_PUBLIC_APP_URL}/`
         })
 
-        await supabaseAdmin
+        await supabase
           .from('rides')
           .update({ 
             payment_intent_id: paymentIntent.id,
@@ -201,7 +217,7 @@ export async function POST(request: NextRequest) {
         const { rideId } = body
         
         // Verify the ride belongs to this user
-        const { data: ride } = await supabaseAdmin
+        const { data: ride } = await supabase
           .from('rides')
           .select('payment_intent_id, estimated_fare, rider_id')
           .eq('id', rideId)
@@ -216,7 +232,7 @@ export async function POST(request: NextRequest) {
             ride.payment_intent_id
           )
 
-          await supabaseAdmin
+          await supabase
             .from('rides')
             .update({ 
               payment_status: 'captured',
@@ -236,7 +252,7 @@ export async function POST(request: NextRequest) {
         const { amount, paymentMethodId } = body
         
         // Get customer ID from database
-        const { data: profile } = await supabaseAdmin
+        const { data: profile } = await supabase
           .from('profiles')
           .select('stripe_customer_id')
           .eq('id', user.id)
