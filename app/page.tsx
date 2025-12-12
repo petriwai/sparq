@@ -152,8 +152,16 @@ export default function Home() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`
       const response = await fetch('/api/stripe', { method: 'POST', headers, body: JSON.stringify({ action, ...data }) })
-      return await response.json()
-    } catch (err) { console.error('Stripe API error:', err); return null }
+      const result = await response.json()
+      if (!response.ok) {
+        console.error('Stripe API error:', result)
+        return { error: result.error || result.details || 'API request failed', code: response.status }
+      }
+      return result
+    } catch (err) { 
+      console.error('Stripe API error:', err)
+      return { error: 'Network error - please check your connection' }
+    }
   }
 
   // Geolocation
@@ -378,9 +386,19 @@ export default function Home() {
       return
     }
     
-    const { status } = await stripeApi('create-payment-intent', { customerId: stripeCustomerId, amount: fare, rideId: ride.id, paymentMethodId: selectedPaymentMethod })
-    if (status === 'requires_capture' || status === 'succeeded') { setScreen('searching'); simulateDriverSearch() }
-    else setAuthError('Payment authorization failed.')
+    const result = await stripeApi('create-payment-intent', { customerId: stripeCustomerId, amount: fare, rideId: ride.id, paymentMethodId: selectedPaymentMethod })
+    
+    if (result?.error) {
+      setAuthError(result.error)
+      return
+    }
+    
+    if (result?.status === 'requires_capture' || result?.status === 'succeeded') { 
+      setScreen('searching')
+      simulateDriverSearch() 
+    } else {
+      setAuthError('Payment authorization failed. Please try again.')
+    }
   }
 
   const simulateDriverSearch = () => {
@@ -692,7 +710,7 @@ export default function Home() {
               </div>
             )}
             {destination && estimatedDistance > 0 && <div className="mt-4 p-4 bg-slate-800/50 border border-slate-700 rounded-xl"><div className="flex justify-between items-center text-sm"><span className="text-slate-400">Trip estimate</span><span className="text-white font-medium">{estimatedDistance.toFixed(1)} mi • ~{estimatedDuration || Math.ceil(estimatedDistance * 3)} min</span></div></div>}
-            {destination && <button onClick={() => setScreen('request')} className="w-full mt-4 py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-lg rounded-2xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">Choose Ride</button>}
+            {destination && <button onClick={() => { setAuthError(''); setScreen('request') }} className="w-full mt-4 py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-lg rounded-2xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">Choose Ride</button>}
           </div>
         )}
 
@@ -703,6 +721,7 @@ export default function Home() {
             <div className="space-y-3 mb-4 max-h-48 overflow-y-auto hide-scrollbar">{RIDE_OPTIONS.map(option => (<button key={option.id} onClick={() => setSelectedRide(option.id)} className={`w-full p-4 rounded-xl border-2 flex items-center gap-4 transition-all ${selectedRide === option.id ? 'border-amber-500 bg-amber-500/10 shadow-md shadow-amber-900/20' : 'border-slate-700 bg-slate-800/50 hover:bg-slate-700/50'}`}><div className="text-3xl">{option.icon}</div><div className="flex-1 text-left"><p className="text-white font-semibold">{option.name}</p><p className="text-slate-400 text-sm">{option.description} • {option.eta} min</p></div><div className="text-right"><p className="text-white font-bold text-lg">${calculatePrice(estimatedDistance, option.multiplier)}</p></div></button>))}</div>
             <div className="glass-card rounded-xl p-4 mb-4"><p className="text-slate-500 text-xs uppercase tracking-wider mb-3">Preferences</p><div className="flex flex-wrap gap-3"><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={quietRide} onChange={(e) => setQuietRide(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" /><span>🤫 Quiet</span></label><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={petFriendly} onChange={(e) => setPetFriendly(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" /><span>🐕 Pets</span></label><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={carSeatNeeded} onChange={(e) => setCarSeatNeeded(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" /><span>👶 Car Seat</span></label></div></div>
             <div className="glass-card rounded-xl p-4 mb-4"><label className="flex items-center justify-between cursor-pointer"><div className="flex items-center gap-2"><span>📅</span><span className="text-white text-sm">Schedule for later</span></div><input type="checkbox" checked={isScheduled} onChange={(e) => setIsScheduled(e.target.checked)} className="w-5 h-5 rounded accent-amber-500" /></label>{isScheduled && <input type="datetime-local" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} min={new Date().toISOString().slice(0, 16)} className="w-full mt-3 bg-slate-700 text-white px-4 py-3 rounded-xl border border-slate-600 focus:border-amber-500 focus:outline-none" />}</div>
+            {authError && <div className="mb-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">{authError}</div>}
             <button onClick={handleRequestRide} className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-lg rounded-2xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">{isScheduled ? 'Schedule Inoka' : 'Confirm Inoka'}</button>
           </div>
         )}
