@@ -203,44 +203,60 @@ export default function Home() {
     if (screen === 'auth' || screen === 'add-place' || screen === 'forgot-password' || screen === 'magic-link-sent' || screen === 'reset-sent') return
 
     const initMap = () => {
-      if (!window.google?.maps || !mapRef.current || mapInstanceRef.current) return
+      // Check that Maps is fully loaded (Map constructor exists)
+      if (typeof google === 'undefined' || !google.maps?.Map || !mapRef.current || mapInstanceRef.current) return
 
-      const map = new google.maps.Map(mapRef.current, {
-        center: { lat: pickup.lat, lng: pickup.lng },
-        zoom: 15,
-        disableDefaultUI: true,
-        gestureHandling: 'greedy',
-        keyboardShortcuts: false,
-        clickableIcons: false,
-        styles: MAP_STYLES,
-      })
-      mapInstanceRef.current = map
+      try {
+        const map = new google.maps.Map(mapRef.current, {
+          center: { lat: pickup.lat, lng: pickup.lng },
+          zoom: 15,
+          disableDefaultUI: true,
+          gestureHandling: 'greedy',
+          keyboardShortcuts: false,
+          clickableIcons: false,
+          styles: MAP_STYLES,
+        })
+        mapInstanceRef.current = map
 
-      directionsServiceRef.current = new google.maps.DirectionsService()
-      directionsRendererRef.current = new google.maps.DirectionsRenderer({
-        map,
-        suppressMarkers: true,
-        polylineOptions: { strokeColor: '#F59E0B', strokeWeight: 6, strokeOpacity: 0.9 },
-      })
+        directionsServiceRef.current = new google.maps.DirectionsService()
+        directionsRendererRef.current = new google.maps.DirectionsRenderer({
+          map,
+          suppressMarkers: true,
+          polylineOptions: { strokeColor: '#F59E0B', strokeWeight: 6, strokeOpacity: 0.9 },
+        })
 
-      // User location marker
-      userMarkerRef.current = new google.maps.Circle({
-        map, center: { lat: pickup.lat, lng: pickup.lng }, radius: 12,
-        fillColor: '#F59E0B', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3, zIndex: 999,
-      })
-      new google.maps.Circle({
-        map, center: { lat: pickup.lat, lng: pickup.lng }, radius: 40,
-        fillColor: '#F59E0B', fillOpacity: 0.15, strokeColor: '#F59E0B', strokeWeight: 1, strokeOpacity: 0.3, zIndex: 998,
-      })
+        // User location marker
+        userMarkerRef.current = new google.maps.Circle({
+          map, center: { lat: pickup.lat, lng: pickup.lng }, radius: 12,
+          fillColor: '#F59E0B', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3, zIndex: 999,
+        })
+        new google.maps.Circle({
+          map, center: { lat: pickup.lat, lng: pickup.lng }, radius: 40,
+          fillColor: '#F59E0B', fillOpacity: 0.15, strokeColor: '#F59E0B', strokeWeight: 1, strokeOpacity: 0.3, zIndex: 998,
+        })
+      } catch (err) {
+        console.error('Map initialization error:', err)
+        setMapError('Failed to initialize map. Please refresh the page.')
+      }
     }
 
-    if (window.google?.maps) initMap()
-    else {
+    // Check if Google Maps is ready using the callback flag
+    const isGoogleMapsReady = () => {
+      return (
+        typeof google !== 'undefined' && 
+        typeof google.maps?.Map === 'function' && 
+        (window as any).googleMapsReady === true
+      )
+    }
+
+    if (isGoogleMapsReady()) {
+      initMap()
+    } else {
       let attempts = 0
-      const maxAttempts = 100 // 10 seconds max
+      const maxAttempts = 150 // 15 seconds max
       const check = setInterval(() => { 
         attempts++
-        if (window.google?.maps) { 
+        if (isGoogleMapsReady()) { 
           clearInterval(check)
           initMap() 
         } else if (attempts >= maxAttempts) {
