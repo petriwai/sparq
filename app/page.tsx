@@ -78,6 +78,9 @@ export default function Home() {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null)
   const [liveETA, setLiveETA] = useState<string>('')
+  const [loadingPlaces, setLoadingPlaces] = useState(true)
+  const [loadingPayments, setLoadingPayments] = useState(true)
+  const [mapError, setMapError] = useState<string | null>(null)
 
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstanceRef = useRef<google.maps.Map | null>(null)
@@ -96,21 +99,39 @@ export default function Home() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
-      if (session?.user) { loadSavedPlaces(session.user.id); loadPaymentMethods(session.user.id) }
+      if (session?.user) { 
+        loadSavedPlaces(session.user.id)
+        loadPaymentMethods(session.user.id) 
+      } else {
+        setLoadingPlaces(false)
+        setLoadingPayments(false)
+      }
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
-      if (session?.user) { loadSavedPlaces(session.user.id); loadPaymentMethods(session.user.id) }
+      if (session?.user) { 
+        loadSavedPlaces(session.user.id)
+        loadPaymentMethods(session.user.id)
+      } else {
+        setLoadingPlaces(false)
+        setLoadingPayments(false)
+      }
     })
     return () => subscription.unsubscribe()
   }, [])
 
   const loadSavedPlaces = async (userId: string) => {
-    const { data } = await supabase.from('saved_places').select('*').eq('user_id', userId).order('created_at', { ascending: false })
-    if (data) setSavedPlaces(data)
+    setLoadingPlaces(true)
+    try {
+      const { data } = await supabase.from('saved_places').select('*').eq('user_id', userId).order('created_at', { ascending: false })
+      if (data) setSavedPlaces(data)
+    } finally {
+      setLoadingPlaces(false)
+    }
   }
 
   const loadPaymentMethods = async (userId: string) => {
+    setLoadingPayments(true)
     try {
       const { data: profile } = await supabase.from('profiles').select('stripe_customer_id').eq('id', userId).single()
       if (profile?.stripe_customer_id) {
@@ -118,7 +139,11 @@ export default function Home() {
         const methods = await stripeApi('get-payment-methods', { customerId: profile.stripe_customer_id })
         if (methods?.length > 0) { setPaymentMethods(methods); setSelectedPaymentMethod(methods[0].id) }
       }
-    } catch (err) { console.error('Error loading payment methods:', err) }
+    } catch (err) { 
+      console.error('Error loading payment methods:', err) 
+    } finally {
+      setLoadingPayments(false)
+    }
   }
 
   const stripeApi = async (action: string, data: any) => {
@@ -211,7 +236,18 @@ export default function Home() {
 
     if (window.google?.maps) initMap()
     else {
-      const check = setInterval(() => { if (window.google?.maps) { clearInterval(check); initMap() } }, 100)
+      let attempts = 0
+      const maxAttempts = 100 // 10 seconds max
+      const check = setInterval(() => { 
+        attempts++
+        if (window.google?.maps) { 
+          clearInterval(check)
+          initMap() 
+        } else if (attempts >= maxAttempts) {
+          clearInterval(check)
+          setMapError('Google Maps failed to load. Please check your internet connection and try again.')
+        }
+      }, 100)
       return () => clearInterval(check)
     }
   }, [pickup, screen])
@@ -589,7 +625,19 @@ export default function Home() {
       
       {/* MAP LAYER - with top padding to account for header */}
       <div ref={mapRef} className="flex-1 relative bg-slate-900 pt-20">
-        {!pickup && (<div className="absolute inset-0 flex items-center justify-center bg-slate-900 z-10"><div className="text-center"><div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div><p className="text-slate-400">Finding your location...</p></div></div>)}
+        {!pickup && !mapError && (<div className="absolute inset-0 flex items-center justify-center bg-slate-900 z-10"><div className="text-center"><div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div><p className="text-slate-400">Finding your location...</p></div></div>)}
+        {mapError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-900 z-10">
+            <div className="text-center p-6">
+              <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-3xl">🗺️</span>
+              </div>
+              <p className="text-white font-semibold mb-2">Map unavailable</p>
+              <p className="text-slate-400 text-sm mb-4">{mapError}</p>
+              <button onClick={() => { setMapError(null); window.location.reload() }} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium">Retry</button>
+            </div>
+          </div>
+        )}
       </div>
       
       {/* BOTTOM SHEET - taller to show less map */}
@@ -615,7 +663,16 @@ export default function Home() {
             {searchResults.length === 0 && (
               <div className="flex gap-3 overflow-x-auto pb-4 hide-scrollbar">
                 {user && <button onClick={() => setScreen('add-place')} className="flex-shrink-0 px-5 py-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-400 font-medium active:scale-95 transition-transform">➕ Add</button>}
-                {getDisplayPlaces().map((item, index) => (<button key={`place-${index}`} className="flex-shrink-0 px-5 py-3 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 rounded-2xl text-sm font-medium text-slate-300 flex items-center gap-2 active:scale-95 transition-transform" onClick={() => { setDestination({ address: item.address, lat: item.lat, lng: item.lng }); setDestinationInput(item.address); setSearchResults([]); setSearchError('') }}><span>{item.icon}</span><span>{item.label}</span></button>))}
+                {loadingPlaces ? (
+                  // Skeleton loading state
+                  <>
+                    <div className="flex-shrink-0 w-24 h-12 skeleton rounded-2xl"></div>
+                    <div className="flex-shrink-0 w-28 h-12 skeleton rounded-2xl"></div>
+                    <div className="flex-shrink-0 w-20 h-12 skeleton rounded-2xl"></div>
+                  </>
+                ) : (
+                  getDisplayPlaces().map((item, index) => (<button key={`place-${index}`} className="flex-shrink-0 px-5 py-3 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 rounded-2xl text-sm font-medium text-slate-300 flex items-center gap-2 active:scale-95 transition-transform" onClick={() => { setDestination({ address: item.address, lat: item.lat, lng: item.lng }); setDestinationInput(item.address); setSearchResults([]); setSearchError('') }}><span>{item.icon}</span><span>{item.label}</span></button>))
+                )}
               </div>
             )}
             {destination && estimatedDistance > 0 && <div className="mt-4 p-4 bg-slate-800/50 border border-slate-700 rounded-xl"><div className="flex justify-between items-center text-sm"><span className="text-slate-400">Trip estimate</span><span className="text-white font-medium">{estimatedDistance.toFixed(1)} mi • ~{estimatedDuration || Math.ceil(estimatedDistance * 3)} min</span></div></div>}
