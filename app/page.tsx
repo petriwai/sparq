@@ -71,7 +71,6 @@ export default function Home() {
   const [searchError, setSearchError] = useState('')
   const [quietRide, setQuietRide] = useState(false)
   const [petFriendly, setPetFriendly] = useState(false)
-  const [carSeatNeeded, setCarSeatNeeded] = useState(false)
   const [isScheduled, setIsScheduled] = useState(false)
   const [scheduledTime, setScheduledTime] = useState('')
   const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null)
@@ -372,7 +371,6 @@ export default function Home() {
       is_scheduled: isScheduled,
       quiet_ride: quietRide,
       pet_friendly: petFriendly,
-      car_seat_needed: carSeatNeeded,
     })
     
     setCurrentRideId(ride.id)
@@ -719,7 +717,7 @@ export default function Home() {
             <div className="flex items-center justify-between mb-4"><button onClick={() => setScreen('home')} className="text-slate-400 hover:text-white flex items-center gap-1">← Back</button><p className="text-white font-semibold">Choose a ride</p><div className="w-12"></div></div>
             {paymentMethods.length > 0 && <div className="glass-card rounded-xl p-3 mb-4 flex items-center justify-between"><div className="flex items-center gap-2"><span>💳</span><span className="text-white text-sm">{paymentMethods[0].brand} •••• {paymentMethods[0].last4}</span></div><a href="/payment-methods" className="text-amber-400 text-sm font-medium">Change</a></div>}
             <div className="space-y-3 mb-4 max-h-48 overflow-y-auto hide-scrollbar">{RIDE_OPTIONS.map(option => (<button key={option.id} onClick={() => setSelectedRide(option.id)} className={`w-full p-4 rounded-xl border-2 flex items-center gap-4 transition-all ${selectedRide === option.id ? 'border-amber-500 bg-amber-500/10 shadow-md shadow-amber-900/20' : 'border-slate-700 bg-slate-800/50 hover:bg-slate-700/50'}`}><div className="text-3xl">{option.icon}</div><div className="flex-1 text-left"><p className="text-white font-semibold">{option.name}</p><p className="text-slate-400 text-sm">{option.description} • {option.eta} min</p></div><div className="text-right"><p className="text-white font-bold text-lg">${calculatePrice(estimatedDistance, option.multiplier)}</p></div></button>))}</div>
-            <div className="glass-card rounded-xl p-4 mb-4"><p className="text-slate-500 text-xs uppercase tracking-wider mb-3">Preferences</p><div className="flex flex-wrap gap-3"><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={quietRide} onChange={(e) => setQuietRide(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" /><span>🤫 Quiet</span></label><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={petFriendly} onChange={(e) => setPetFriendly(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" /><span>🐕 Pets</span></label><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={carSeatNeeded} onChange={(e) => setCarSeatNeeded(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" /><span>👶 Car Seat</span></label></div></div>
+            <div className="glass-card rounded-xl p-4 mb-4"><p className="text-slate-500 text-xs uppercase tracking-wider mb-3">Preferences</p><div className="flex flex-wrap gap-3"><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={quietRide} onChange={(e) => setQuietRide(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" /><span>🤫 Quiet</span></label><label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer"><input type="checkbox" checked={petFriendly} onChange={(e) => setPetFriendly(e.target.checked)} className="w-4 h-4 rounded accent-amber-500" /><span>🐕 Pets</span></label></div></div>
             <div className="glass-card rounded-xl p-4 mb-4"><label className="flex items-center justify-between cursor-pointer"><div className="flex items-center gap-2"><span>📅</span><span className="text-white text-sm">Schedule for later</span></div><input type="checkbox" checked={isScheduled} onChange={(e) => setIsScheduled(e.target.checked)} className="w-5 h-5 rounded accent-amber-500" /></label>{isScheduled && <input type="datetime-local" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} min={new Date().toISOString().slice(0, 16)} className="w-full mt-3 bg-slate-700 text-white px-4 py-3 rounded-xl border border-slate-600 focus:border-amber-500 focus:outline-none" />}</div>
             {authError && <div className="mb-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">{authError}</div>}
             <button onClick={handleRequestRide} className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-lg rounded-2xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">{isScheduled ? 'Schedule Inoka' : 'Confirm Inoka'}</button>
@@ -737,7 +735,7 @@ export default function Home() {
             </div>
             <h3 className="text-xl font-bold text-white mb-2">Connecting you...</h3>
             <p className="text-slate-400 mb-1">Payment authorized: <span className="text-amber-400 font-semibold">${rideFare.toFixed(2)}</span></p>
-            <div className="flex justify-center gap-2 mb-4 text-slate-500 text-sm">{quietRide && <span>🤫</span>}{petFriendly && <span>🐕</span>}{carSeatNeeded && <span>👶</span>}</div>
+            <div className="flex justify-center gap-2 mb-4 text-slate-500 text-sm">{quietRide && <span>🤫</span>}{petFriendly && <span>🐕</span>}</div>
             <div className="w-full bg-slate-700 rounded-full h-2 mb-6"><div className="bg-gradient-to-r from-amber-500 to-amber-400 h-2 rounded-full transition-all duration-300" style={{ width: `${searchProgress}%` }}></div></div>
             <button onClick={() => { if (currentRideId) cancelRide(currentRideId); setScreen('home') }} className="px-6 py-3 bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 rounded-xl">Cancel Request</button>
           </div>

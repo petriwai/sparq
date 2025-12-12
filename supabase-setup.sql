@@ -90,12 +90,11 @@ create table if not exists public.rides (
   payment_intent_id text,
   payment_status text,
   paid_amount numeric,
-  -- New features
+  -- Scheduling and preferences
   scheduled_for timestamptz null,
   is_scheduled boolean default false,
   quiet_ride boolean default false,
   pet_friendly boolean default false,
-  car_seat_needed boolean default false,
   -- Timestamps
   created_at timestamptz default now()
 );
@@ -179,4 +178,3 @@ grant update (name, license_number) on table public.drivers to authenticated;
 -- alter table public.rides add column if not exists is_scheduled boolean default false;
 -- alter table public.rides add column if not exists quiet_ride boolean default false;
 -- alter table public.rides add column if not exists pet_friendly boolean default false;
--- alter table public.rides add column if not exists car_seat_needed boolean default false;

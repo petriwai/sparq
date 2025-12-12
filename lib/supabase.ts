@@ -20,7 +20,6 @@ export async function createRideRequest(
     is_scheduled?: boolean
     quiet_ride?: boolean
     pet_friendly?: boolean
-    car_seat_needed?: boolean
   },
   pickupAddress?: string,
   dropoffAddress?: string,
