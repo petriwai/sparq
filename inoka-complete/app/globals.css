@@ -1,0 +1,204 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0f172a;
+  --foreground: #f8fafc;
+  --inoka-amber: #F59E0B;
+  --inoka-amber-dark: #D97706;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  min-height: 100%;
+  background: #0a0a0a;
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Hide Scrollbar */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Button Press Effect */
+.active\:scale-98:active {
+  transform: scale(0.98);
+}
+
+/* Glassmorphism Card */
+.glass {
+  background: rgba(30, 41, 59, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.glass-amber {
+  background: rgba(245, 158, 11, 0.1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* Animations */
+@keyframes slideUp {
+  from { 
+    transform: translateY(100%); 
+    opacity: 0; 
+  }
+  to { 
+    transform: translateY(0); 
+    opacity: 1; 
+  }
+}
+
+@keyframes slideDown {
+  from { 
+    transform: translateY(-20px); 
+    opacity: 0; 
+  }
+  to { 
+    transform: translateY(0); 
+    opacity: 1; 
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulse-ring {
+  0% { 
+    transform: scale(0.9); 
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); 
+  }
+  70% { 
+    transform: scale(1); 
+    box-shadow: 0 0 0 15px rgba(245, 158, 11, 0); 
+  }
+  100% { 
+    transform: scale(0.9); 
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); 
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s infinite;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* Safe Area Support */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Dynamic Viewport Height */
+@supports (height: 100dvh) {
+  .h-screen {
+    height: 100dvh;
+  }
+  .min-h-screen {
+    min-height: 100dvh;
+  }
+  .h-dvh {
+    height: 100dvh;
+  }
+}
+
+/* Desktop Phone Frame */
+@media (min-width: 768px) {
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 20px;
+    background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%);
+  }
+}
+
+/* Custom Checkbox Styling */
+input[type="checkbox"] {
+  accent-color: #F59E0B;
+}
+
+/* Premium Text Shadow */
+.text-shadow-amber {
+  text-shadow: 0 0 20px rgba(245, 158, 11, 0.5);
+}
+
+/* Glowing pulse ring that follows the car */
+.car-glow-pulse {
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  background: radial-gradient(circle at center, #fbbf24 0%, transparent 65%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9998;
+  animation: carPulse 2.2s infinite ease-out;
+  transform: translate(-50%, -50%);
+}
+
+@keyframes carPulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.6);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.8);
+    opacity: 0;
+  }
+}
+
+/* Remove Google Maps clutter (what's legally removable) */
+.gm-style .gmnoprint,
+.gm-style .gm-style-cc {
+  display: none !important;
+}
+
+/* Hide keyboard shortcuts popup */
+.gm-style iframe + div {
+  display: none !important;
+}
