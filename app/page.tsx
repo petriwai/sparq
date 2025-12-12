@@ -155,12 +155,23 @@ export default function Home() {
     }
   }
 
-  // Stripe API helper
+  // Stripe API helper with auth
   const stripeApi = async (action: string, data: any) => {
     try {
+      // Get current session for auth header
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      const headers: Record<string, string> = { 
+        'Content-Type': 'application/json' 
+      }
+      
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`
+      }
+      
       const response = await fetch('/api/stripe', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ action, ...data })
       })
       return await response.json()
@@ -170,24 +181,69 @@ export default function Home() {
     }
   }
 
-  // Get user's current location
+  // Get user's current location with timeout to prevent hanging
   useEffect(() => {
+    // Set default location immediately so UI doesn't hang
+    const defaultLocation = { 
+      address: 'Springfield, IL', 
+      lat: 39.7817, 
+      lng: -89.6501 
+    }
+    
+    // Timeout fallback - if geolocation takes too long, use default
+    const fallbackTimeout = setTimeout(() => {
+      if (!pickup) {
+        setPickup(defaultLocation)
+      }
+    }, 5000) // 5 second timeout
+    
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (position) => {
+          clearTimeout(fallbackTimeout)
           const { latitude, longitude } = position.coords
-          const address = await reverseGeocode(latitude, longitude)
-          setPickup({ address, lat: latitude, lng: longitude })
+          
+          // Set pickup immediately with coordinates
+          setPickup({ 
+            address: 'Getting address...', 
+            lat: latitude, 
+            lng: longitude 
+          })
+          
+          // Then update address asynchronously (with abort timeout)
+          const controller = new AbortController()
+          const addressTimeout = setTimeout(() => controller.abort(), 5000)
+          
+          try {
+            const address = await reverseGeocode(latitude, longitude)
+            clearTimeout(addressTimeout)
+            setPickup({ address, lat: latitude, lng: longitude })
+          } catch (err) {
+            clearTimeout(addressTimeout)
+            // Keep coordinates, just use fallback address
+            setPickup({ 
+              address: 'Current Location', 
+              lat: latitude, 
+              lng: longitude 
+            })
+          }
         },
         () => {
-          setPickup({ 
-            address: 'Springfield, IL', 
-            lat: 39.7817, 
-            lng: -89.6501 
-          })
+          clearTimeout(fallbackTimeout)
+          setPickup(defaultLocation)
+        },
+        { 
+          timeout: 10000, // 10 second timeout for geolocation
+          maximumAge: 60000, // Accept cached position up to 1 minute old
+          enableHighAccuracy: false // Faster, less accurate
         }
       )
+    } else {
+      clearTimeout(fallbackTimeout)
+      setPickup(defaultLocation)
     }
+    
+    return () => clearTimeout(fallbackTimeout)
   }, [])
 
   // Reverse geocode via server API

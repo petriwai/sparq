@@ -16,7 +16,27 @@ type PaymentMethod = {
   exp_year: number
 }
 
-function AddCardForm({ customerId, onSuccess }: { customerId: string; onSuccess: () => void }) {
+// Helper to make authenticated API calls
+async function stripeApi(action: string, data: any = {}) {
+  const { data: { session } } = await supabase.auth.getSession()
+  
+  const headers: Record<string, string> = { 
+    'Content-Type': 'application/json' 
+  }
+  
+  if (session?.access_token) {
+    headers['Authorization'] = `Bearer ${session.access_token}`
+  }
+  
+  const response = await fetch('/api/stripe', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action, ...data })
+  })
+  return response.json()
+}
+
+function AddCardForm({ onSuccess }: { onSuccess: () => void }) {
   const stripe = useStripe()
   const elements = useElements()
   const [loading, setLoading] = useState(false)
@@ -30,12 +50,13 @@ function AddCardForm({ customerId, onSuccess }: { customerId: string; onSuccess:
     setError('')
 
     try {
-      const response = await fetch('/api/stripe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create-setup-intent', customerId })
-      })
-      const { clientSecret } = await response.json()
+      const { clientSecret, error: apiError } = await stripeApi('create-setup-intent')
+      
+      if (apiError) {
+        setError(apiError)
+        setLoading(false)
+        return
+      }
 
       const { error: stripeError } = await stripe.confirmCardSetup(clientSecret, {
         payment_method: { card: elements.getElement(CardElement)! }
@@ -101,42 +122,31 @@ export default function PaymentMethods() {
 
     if (profile?.stripe_customer_id) {
       setCustomerId(profile.stripe_customer_id)
-      await loadPaymentMethods(profile.stripe_customer_id)
+      await loadPaymentMethods()
     } else {
-      const response = await fetch('/api/stripe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create-customer', email: user.email, userId: user.id })
-      })
-      const { customerId: newCustomerId } = await response.json()
+      // Create new Stripe customer
+      const { customerId: newCustomerId } = await stripeApi('create-customer')
       setCustomerId(newCustomerId)
     }
     
     setLoading(false)
   }
 
-  const loadPaymentMethods = async (customerId: string) => {
-    const response = await fetch('/api/stripe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'get-payment-methods', customerId })
-    })
-    const methods = await response.json()
-    setPaymentMethods(methods)
+  const loadPaymentMethods = async () => {
+    const methods = await stripeApi('get-payment-methods')
+    if (Array.isArray(methods)) {
+      setPaymentMethods(methods)
+    }
   }
 
   const handleDeleteCard = async (paymentMethodId: string) => {
-    await fetch('/api/stripe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'delete-payment-method', paymentMethodId })
-    })
+    await stripeApi('delete-payment-method', { paymentMethodId })
     setPaymentMethods(paymentMethods.filter(pm => pm.id !== paymentMethodId))
   }
 
   const handleCardAdded = () => {
     setShowAddCard(false)
-    if (customerId) loadPaymentMethods(customerId)
+    loadPaymentMethods()
   }
 
   const getCardIcon = (brand: string) => {
@@ -183,9 +193,9 @@ export default function PaymentMethods() {
           </div>
         )}
 
-        {showAddCard && customerId ? (
+        {showAddCard ? (
           <Elements stripe={stripePromise}>
-            <AddCardForm customerId={customerId} onSuccess={handleCardAdded} />
+            <AddCardForm onSuccess={handleCardAdded} />
             <button onClick={() => setShowAddCard(false)} className="w-full mt-3 py-3 text-slate-400 hover:text-white">Cancel</button>
           </Elements>
         ) : (

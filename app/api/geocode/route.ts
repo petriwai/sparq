@@ -5,9 +5,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { address, lat, lng, userLat, userLng } = body
 
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY
 
     if (!apiKey) {
+      console.error('GOOGLE_MAPS_API_KEY not configured')
       return NextResponse.json({ error: 'API key not configured' }, { status: 500 })
     }
 
