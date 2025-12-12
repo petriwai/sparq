@@ -749,7 +749,10 @@ export default function Home() {
               <div className="mt-4 pt-4 border-t border-slate-600/50"><p className="text-slate-400 text-sm">{driverInfo.car}</p><p className="text-white font-mono text-lg">{driverInfo.plate}</p></div>
             </div>
             <div className="flex gap-3 mb-4"><button className="flex-1 py-3 glass-card hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2"><span>📞</span> Call</button><button className="flex-1 py-3 glass-card hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2"><span>💬</span> Message</button></div>
-            <button onClick={handleStartRide} className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all">Start Ride</button>
+            <p className="text-center text-slate-400 text-sm mb-4">Your driver will start the trip when you're picked up</p>
+            <button onClick={() => { if (currentRideId) cancelRide(currentRideId); setScreen('home') }} className="w-full py-3 glass-card hover:bg-slate-700/50 text-slate-300 rounded-xl">Cancel Ride</button>
+            {/* Demo: Simulate driver starting the ride */}
+            <button onClick={handleStartRide} className="w-full mt-3 py-3 border border-dashed border-slate-600 hover:border-slate-500 text-slate-500 hover:text-slate-400 rounded-xl text-sm">[Demo] Simulate Driver Start</button>
           </div>
         )}
 
@@ -758,7 +761,8 @@ export default function Home() {
             <div className="flex justify-between items-center mb-2"><span className="text-amber-400 font-bold tracking-wider text-sm uppercase">On Trip</span><span className="text-slate-400 text-sm">{formatTime(rideTimer)}</span></div>
             <div className="text-center mb-6"><p className="text-6xl font-black text-amber-400 tracking-tighter" style={{ textShadow: '0 0 30px rgba(245, 158, 11, 0.4)' }}>{liveETA || formatTime(rideTimer)}</p><p className="text-xl font-medium text-amber-300 mt-2">{liveETA && liveETA !== 'Arrived!' ? 'Until arrival' : liveETA === 'Arrived!' ? '🎉 You\'ve arrived!' : 'Ride time'}</p></div>
             <h3 className="text-white text-lg font-semibold mb-4">Heading to {destination?.address.split(',')[0]}</h3>
-            <button onClick={handleCompleteRide} className="w-full py-4 glass-card hover:bg-slate-700/50 text-white font-semibold rounded-xl">Complete Ride (Demo)</button>
+            <p className="text-center text-slate-400 text-sm mb-4">Driver will end the trip at your destination</p>
+            <button onClick={handleCompleteRide} className="w-full py-3 border border-dashed border-slate-600 hover:border-slate-500 text-slate-500 hover:text-slate-400 rounded-xl text-sm">[Demo] Simulate Arrival</button>
           </div>
         )}
       </div>
