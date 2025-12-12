@@ -878,7 +878,7 @@ export default function Home() {
   // Choose Location Screen (multiple search results)
   if (screen === 'choose-location') {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col">
+      <div className="fixed inset-0 bg-slate-900 flex flex-col z-50">
         <div className="p-4 flex items-center gap-4 border-b border-slate-800">
           <button onClick={() => { setScreen('home'); setSearchResults([]); }} className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center text-white">←</button>
           <div>
@@ -887,7 +887,8 @@ export default function Home() {
           </div>
         </div>
         
-        <div className="flex-1 p-4 overflow-y-auto">
+        <div className="flex-1 p-4 overflow-y-auto bg-slate-900">
+          <p className="text-amber-400 mb-4">Found {searchResults.length} locations:</p>
           <div className="space-y-3">
             {searchResults.map((result, index) => (
               <button
@@ -912,7 +913,7 @@ export default function Home() {
           
           {searchResults.length === 0 && (
             <div className="text-center py-12">
-              <p className="text-slate-400">No locations found</p>
+              <p className="text-slate-400">No locations found. Try a different search.</p>
             </div>
           )}
         </div>
