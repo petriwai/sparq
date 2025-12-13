@@ -44,7 +44,7 @@ export default function RootLayout({
         {/* Google Maps API - loads after callback is defined */}
         {mapsKey && (
           <Script
-            src={`https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places,geometry&callback=initGoogleMaps`}
+            src={`https://maps.googleapis.com/maps/api/js?key=${mapsKey}&libraries=places,geometry&callback=initGoogleMaps&loading=async`}
             strategy="afterInteractive"
           />
         )}

@@ -182,6 +182,24 @@ export default function Home() {
         .single()
 
       if (activeRide) {
+        const rideAge = Date.now() - new Date(activeRide.created_at).getTime()
+        const thirtyMinutes = 30 * 60 * 1000
+        
+        // If ride is "requested" but older than 30 minutes, auto-cancel it (stale)
+        if (activeRide.status === 'requested' && rideAge > thirtyMinutes) {
+          console.log('Auto-cancelling stale ride request:', activeRide.id)
+          await cancelRide(activeRide.id)
+          return
+        }
+        
+        // Only restore rides from the last hour for accepted/in-progress
+        const oneHour = 60 * 60 * 1000
+        if (rideAge > oneHour && activeRide.status !== 'in-progress') {
+          console.log('Ride too old to restore, cancelling:', activeRide.id)
+          await cancelRide(activeRide.id)
+          return
+        }
+        
         setCurrentRideId(activeRide.id)
         setRideFare(activeRide.estimated_fare || 0)
         
@@ -190,13 +208,15 @@ export default function Home() {
           // Try to geocode the address to get coordinates
           try {
             const response = await fetch(`/api/geocode?address=${encodeURIComponent(activeRide.dropoff_address)}`)
-            const geocodeData = await response.json()
-            if (geocodeData.lat && geocodeData.lng) {
-              setDestination({
-                address: activeRide.dropoff_address,
-                lat: geocodeData.lat,
-                lng: geocodeData.lng
-              })
+            if (response.ok) {
+              const geocodeData = await response.json()
+              if (geocodeData.lat && geocodeData.lng) {
+                setDestination({
+                  address: activeRide.dropoff_address,
+                  lat: geocodeData.lat,
+                  lng: geocodeData.lng
+                })
+              }
             }
           } catch (e) {
             // If geocoding fails, just set address without coords

@@ -1,5 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+// GET handler for simple forward geocoding (address -> coordinates)
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const address = searchParams.get('address')
+    
+    if (!address) {
+      return NextResponse.json({ error: 'Missing address parameter' }, { status: 400 })
+    }
+    
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({ error: 'GOOGLE_MAPS_API_KEY not configured' }, { status: 500 })
+    }
+    
+    // Simple forward geocode
+    const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&region=us&key=${apiKey}`
+    const response = await fetch(geoUrl)
+    const data = await response.json()
+    
+    if (data.status === 'OK' && data.results?.[0]) {
+      const result = data.results[0]
+      return NextResponse.json({
+        lat: result.geometry.location.lat,
+        lng: result.geometry.location.lng,
+        formatted_address: result.formatted_address
+      })
+    }
+    
+    return NextResponse.json({ error: 'Address not found' }, { status: 404 })
+  } catch (error) {
+    console.error('Geocode GET error:', error)
+    return NextResponse.json({ error: 'Geocoding failed' }, { status: 500 })
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
