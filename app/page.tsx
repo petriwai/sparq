@@ -144,11 +144,14 @@ export default function Home() {
   const cancelAndReset = async () => {
     stopDriverSearch()
     if (currentRideId) {
-      await supabase
-        .from('rides')
-        .update({ status: 'cancelled' })
-        .eq('id', currentRideId)
-        .catch(() => {})
+      try {
+        await supabase
+          .from('rides')
+          .update({ status: 'cancelled' })
+          .eq('id', currentRideId)
+      } catch {
+        // Ignore cancel errors
+      }
     }
     setCurrentRideId(null)
     setRideFare(0)
