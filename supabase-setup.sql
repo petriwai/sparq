@@ -170,7 +170,7 @@ revoke update on table public.drivers from anon, authenticated;
 grant update (name, license_number) on table public.drivers to authenticated;
 
 -- ============================================================================
--- MESSAGES TABLE (Premium Chat with Voice Support)
+-- MESSAGES TABLE (Premium Chat with Voice Support + Moderation)
 -- ============================================================================
 create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
@@ -179,7 +179,8 @@ create table if not exists public.messages (
   message_type text not null default 'text' check (message_type in ('text', 'voice')),
   content text not null,
   created_at timestamptz not null default now(),
-  read_at timestamptz null
+  read_at timestamptz null,
+  flagged boolean default false  -- For content moderation
 );
 
 -- Index for fast message retrieval
@@ -188,7 +189,7 @@ create index if not exists messages_ride_created_idx
 
 alter table public.messages enable row level security;
 
--- Select: only ride participants (rider OR driver)
+-- Select: ride participants can read messages (even after ride completes - for disputes)
 create policy "messages_select_participants"
 on public.messages for select
 using (
@@ -199,8 +200,8 @@ using (
   )
 );
 
--- Insert: only participants, sender_id must be you
-create policy "messages_insert_participants"
+-- Insert: only participants, only during ACTIVE rides (prevents post-ride harassment)
+create policy "messages_insert_participants_active_only"
 on public.messages for insert
 with check (
   sender_id = auth.uid()
@@ -208,13 +209,36 @@ with check (
     select 1 from public.rides r
     where r.id = messages.ride_id
       and (r.rider_id = auth.uid() or r.driver_id = auth.uid())
+      and r.status not in ('completed', 'cancelled')  -- Locks chat after ride ends
   )
 );
 
 -- No direct UPDATE from clients (use RPC for read receipts)
 revoke update on public.messages from authenticated;
 
--- RPC to mark messages read (security definer)
+-- ============================================================================
+-- CONTENT MODERATION (Basic profanity filter)
+-- ============================================================================
+create or replace function flag_inappropriate_messages()
+returns trigger as $$
+begin
+  -- Basic filter - expand regex pattern as needed for production
+  if new.content ~* '\m(fuck|shit|ass|bitch|dick|pussy|cock|cunt)\M' then
+    new.flagged = true;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists flag_messages on public.messages;
+create trigger flag_messages
+  before insert on public.messages
+  for each row
+  execute function flag_inappropriate_messages();
+
+-- ============================================================================
+-- RPC: Mark Messages Read (Security Definer for safe updates)
+-- ============================================================================
 create or replace function public.mark_messages_read(p_ride_id uuid)
 returns void
 language plpgsql
@@ -243,6 +267,48 @@ alter publication supabase_realtime add table messages;
 -- ADD DRIVER_ID TO RIDES (for chat participant lookup)
 -- ============================================================================
 alter table public.rides add column if not exists driver_id uuid references auth.users(id) null;
+
+-- ============================================================================
+-- STORAGE POLICIES FOR VOICE MESSAGES
+-- ============================================================================
+-- IMPORTANT: First create bucket "chat-audio" in Dashboard > Storage (set to PRIVATE)
+-- Then run these policies:
+
+-- Allow ride participants to upload voice files
+create policy "Allow ride participants to upload audio"
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'chat-audio'
+  and exists (
+    select 1 from public.rides r
+    where r.id::text = (storage.foldername(name))[1]
+      and (r.rider_id = auth.uid() or r.driver_id = auth.uid())
+      and r.status not in ('completed', 'cancelled')
+  )
+);
+
+-- Allow ride participants to download/listen
+create policy "Allow ride participants to read audio"
+on storage.objects for select
+to authenticated
+using (
+  bucket_id = 'chat-audio'
+  and exists (
+    select 1 from public.rides r
+    where r.id::text = (storage.foldername(name))[1]
+      and (r.rider_id = auth.uid() or r.driver_id = auth.uid())
+  )
+);
+
+-- Allow users to delete their own voice messages
+create policy "Allow users to delete own audio"
+on storage.objects for delete
+to authenticated
+using (
+  bucket_id = 'chat-audio'
+  and (storage.foldername(name))[2] = auth.uid()::text
+);
 
 -- ============================================================================
 -- MIGRATION: Add new columns to existing rides table

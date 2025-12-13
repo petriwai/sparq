@@ -129,6 +129,16 @@ export default function Home() {
   const carMarkerRef = useRef<google.maps.Marker | null>(null)
   const animationFrameRef = useRef<number | null>(null)
   const hapticIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // Driver search interval (must be stoppable to prevent ghost found)
+  const searchIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  
+  const stopDriverSearch = () => {
+    if (searchIntervalRef.current) {
+      clearInterval(searchIntervalRef.current)
+      searchIntervalRef.current = null
+    }
+  }
 
   const [driverInfo] = useState({ name: 'Marcus T.', rating: 4.9, car: 'White Toyota Camry', plate: 'IL-7829', photo: '👨‍✈️', eta: 3, phone: '+12175551234' })
 
@@ -317,8 +327,12 @@ export default function Home() {
         center: { lat: pickup.lat, lng: pickup.lng },
         zoom: 15,
         disableDefaultUI: true,
-        gestureHandling: 'greedy',
+        fullscreenControl: false,
+        streetViewControl: false,
+        mapTypeControl: false,
+        zoomControl: false,
         keyboardShortcuts: false,
+        gestureHandling: 'greedy',
         clickableIcons: false,
         styles: MAP_STYLES,
       })
@@ -496,11 +510,28 @@ export default function Home() {
   }
 
   const simulateDriverSearch = () => {
+    stopDriverSearch()
     setSearchProgress(0)
-    const interval = setInterval(() => {
-      setSearchProgress(prev => { if (prev >= 100) { clearInterval(interval); setScreen('found'); return 100 }; return prev + 2 })
+
+    searchIntervalRef.current = setInterval(() => {
+      setSearchProgress(prev => {
+        if (prev >= 100) {
+          stopDriverSearch()
+          setScreen('found')
+          return 100
+        }
+        return prev + 2
+      })
     }, 100)
   }
+  
+  // Cleanup search interval on unmount
+  useEffect(() => () => stopDriverSearch(), [])
+  
+  // Stop search when leaving searching screen
+  useEffect(() => {
+    if (screen !== 'searching') stopDriverSearch()
+  }, [screen])
 
   const playArrivalSound = () => {
     try {
@@ -715,8 +746,9 @@ export default function Home() {
 
     return () => {
       cancelled = true
-      if (chatChannelRef.current) {
-        supabase.removeChannel(chatChannelRef.current)
+      // Remove the exact channel instance we created (not chatChannelRef.current which may have changed)
+      supabase.removeChannel(channel)
+      if (chatChannelRef.current === channel) {
         chatChannelRef.current = null
       }
     }
@@ -736,8 +768,10 @@ export default function Home() {
     const messageText = chatInput.trim()
     setChatInput('')
     
-    // Optimistic UI update
-    const tempId = Date.now().toString()
+    // Optimistic UI update with UUID to prevent collision
+    const tempId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
     const newMessage: ChatMessage = {
       id: tempId,
       sender: 'rider',
@@ -1418,7 +1452,7 @@ export default function Home() {
             <p className="text-slate-400 mb-1">Payment authorized: <span className="text-amber-400 font-semibold">${rideFare.toFixed(2)}</span></p>
             <div className="flex justify-center gap-2 mb-4 text-slate-500 text-sm">{quietRide && <span>🤫</span>}{petFriendly && <span>🐕</span>}</div>
             <div className="w-full bg-slate-700 rounded-full h-2 mb-6"><div className="bg-gradient-to-r from-amber-500 to-amber-400 h-2 rounded-full transition-all duration-300" style={{ width: `${searchProgress}%` }}></div></div>
-            <button onClick={() => { if (currentRideId) cancelRide(currentRideId); setScreen('home') }} className="px-6 py-3 bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 rounded-xl">Cancel Request</button>
+            <button onClick={() => { stopDriverSearch(); if (currentRideId) cancelRide(currentRideId); setScreen('home') }} className="px-6 py-3 bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 rounded-xl">Cancel Request</button>
           </div>
         )}
 
@@ -1431,7 +1465,7 @@ export default function Home() {
             </div>
             <div className="flex gap-3 mb-4"><a href={`tel:${driverInfo.phone}`} className="flex-1 py-3 glass-card hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2"><span>📞</span> Call</a><button onClick={openChat} className="flex-1 py-3 glass-card hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2 relative"><span>💬</span> Message{unreadCount > 0 && <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center">{unreadCount}</span>}</button></div>
             <p className="text-center text-slate-400 text-sm mb-4">Your driver will start the trip when you're picked up</p>
-            <button onClick={() => { if (currentRideId) cancelRide(currentRideId); setScreen('home') }} className="w-full py-3 glass-card hover:bg-slate-700/50 text-slate-300 rounded-xl">Cancel Ride</button>
+            <button onClick={() => { stopDriverSearch(); if (currentRideId) cancelRide(currentRideId); setScreen('home') }} className="w-full py-3 glass-card hover:bg-slate-700/50 text-slate-300 rounded-xl">Cancel Ride</button>
             {/* Demo: Simulate driver starting the ride */}
             <button onClick={handleStartRide} className="w-full mt-3 py-3 border border-dashed border-slate-600 hover:border-slate-500 text-slate-500 hover:text-slate-400 rounded-xl text-sm">[Demo] Simulate Driver Start</button>
           </div>

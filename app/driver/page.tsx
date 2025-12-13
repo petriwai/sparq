@@ -361,8 +361,9 @@ export default function DriverApp() {
 
     return () => {
       cancelled = true
-      if (chatChannelRef.current) {
-        supabase.removeChannel(chatChannelRef.current)
+      // Remove the exact channel instance we created (not chatChannelRef.current which may have changed)
+      supabase.removeChannel(channel)
+      if (chatChannelRef.current === channel) {
         chatChannelRef.current = null
       }
     }
@@ -382,8 +383,10 @@ export default function DriverApp() {
     const messageText = chatInput.trim()
     setChatInput('')
     
-    // Optimistic UI update
-    const tempId = Date.now().toString()
+    // Optimistic UI update with UUID to prevent collision
+    const tempId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
     const newMessage: ChatMessage = {
       id: tempId,
       sender: 'driver',

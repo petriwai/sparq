@@ -182,10 +182,6 @@ body {
   animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
-}
-
 /* Smooth scrolling for chat */
 .scroll-smooth {
   scroll-behavior: smooth;
@@ -266,20 +262,12 @@ input[type="checkbox"] {
 }
 
 /* Google Maps UI Cleanup - KEEP attribution visible for compliance */
-/* Only hide keyboard shortcuts popup, not attribution */
-.gm-style iframe + div {
-  display: none !important;
-}
+/* Map controls are disabled via JavaScript options (more stable than CSS selectors) */
 
 /* Style the attribution to be less intrusive but still visible */
 .gm-style .gm-style-cc {
   opacity: 0.7;
   font-size: 10px !important;
-}
-
-/* Hide fullscreen button only */
-.gm-style button[title="Toggle fullscreen view"] {
-  display: none !important;
 }
 
 /* Skeleton Loading Animation */
