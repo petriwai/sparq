@@ -108,9 +108,6 @@ export default function AdminPage() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
-    return () => sub.subscription.unsubscribe()
-  }, [])
-
   const isAdmin = role === 'admin'
 
   async function signIn() {
