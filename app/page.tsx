@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase, createRideRequest, cancelRide } from '@/lib/supabase'
 import { sendText, markRead, getMessages, subscribeToMessages, broadcastTyping, type ChatMessage as DBChatMessage } from '@/lib/chat'
 import type { User } from '@supabase/supabase-js'
@@ -97,6 +97,27 @@ export default function Home() {
   const [isTyping, setIsTyping] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  
+  // Maps ready state (event-based, no polling)
+  const [mapsReady, setMapsReady] = useState<boolean>(false)
+  
+  // Refs for chat subscription (to access current values in callbacks)
+  const showChatRef = useRef(false)
+  const userIdRef = useRef<string | null>(null)
+  
+  useEffect(() => { showChatRef.current = showChat }, [showChat])
+  useEffect(() => { userIdRef.current = user?.id ?? null }, [user?.id])
+  
+  // Listen for Google Maps ready event
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).googleMapsReady === true) {
+      setMapsReady(true)
+      return
+    }
+    const onReady = () => setMapsReady(true)
+    window.addEventListener('google-maps-ready', onReady)
+    return () => window.removeEventListener('google-maps-ready', onReady)
+  }, [])
 
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstanceRef = useRef<google.maps.Map | null>(null)
@@ -117,7 +138,8 @@ export default function Home() {
       setUser(session?.user ?? null)
       if (session?.user) { 
         loadSavedPlaces(session.user.id)
-        loadPaymentMethods(session.user.id) 
+        loadPaymentMethods(session.user.id)
+        restoreActiveRide(session.user.id) // Restore state on refresh
       } else {
         setLoadingPlaces(false)
         setLoadingPayments(false)
@@ -135,6 +157,68 @@ export default function Home() {
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  // Restore active ride state on page refresh
+  const restoreActiveRide = async (userId: string) => {
+    try {
+      // Check for in-progress ride
+      const { data: activeRide } = await supabase
+        .from('rides')
+        .select('*')
+        .eq('rider_id', userId)
+        .in('status', ['requested', 'accepted', 'in-progress'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (activeRide) {
+        setCurrentRideId(activeRide.id)
+        setRideFare(activeRide.estimated_fare || 0)
+        
+        // Restore destination from ride record
+        if (activeRide.dropoff_address) {
+          // Try to geocode the address to get coordinates
+          try {
+            const response = await fetch(`/api/geocode?address=${encodeURIComponent(activeRide.dropoff_address)}`)
+            const geocodeData = await response.json()
+            if (geocodeData.lat && geocodeData.lng) {
+              setDestination({
+                address: activeRide.dropoff_address,
+                lat: geocodeData.lat,
+                lng: geocodeData.lng
+              })
+            }
+          } catch (e) {
+            // If geocoding fails, just set address without coords
+            console.error('Failed to geocode saved destination:', e)
+          }
+        }
+        
+        // Restore ride preferences
+        setQuietRide(activeRide.quiet_ride || false)
+        setPetFriendly(activeRide.pet_friendly || false)
+        
+        // Restore to appropriate screen based on status
+        switch (activeRide.status) {
+          case 'requested':
+            setScreen('searching')
+            simulateDriverSearch() // Resume search animation
+            break
+          case 'accepted':
+            setScreen('found')
+            break
+          case 'in-progress':
+            setScreen('in-ride')
+            break
+        }
+        
+        console.log('Restored active ride:', activeRide.id, 'status:', activeRide.status)
+      }
+    } catch (err) {
+      // No active ride found - that's fine
+      console.log('No active ride to restore')
+    }
+  }
 
   const loadSavedPlaces = async (userId: string) => {
     setLoadingPlaces(true)
@@ -221,76 +305,46 @@ export default function Home() {
     } catch { return { error: 'Search request failed' } }
   }
 
-  // Map initialization
+  // Map initialization (event-based, no polling)
   useEffect(() => {
+    if (!mapsReady) return
     if (!mapRef.current || !pickup) return
     if (screen === 'auth' || screen === 'add-place' || screen === 'forgot-password' || screen === 'magic-link-sent' || screen === 'reset-sent') return
+    if (mapInstanceRef.current) return // Already initialized
 
-    const initMap = () => {
-      // Check that Maps is fully loaded (Map constructor exists)
-      if (typeof google === 'undefined' || !google.maps?.Map || !mapRef.current || mapInstanceRef.current) return
+    try {
+      const map = new google.maps.Map(mapRef.current, {
+        center: { lat: pickup.lat, lng: pickup.lng },
+        zoom: 15,
+        disableDefaultUI: true,
+        gestureHandling: 'greedy',
+        keyboardShortcuts: false,
+        clickableIcons: false,
+        styles: MAP_STYLES,
+      })
+      mapInstanceRef.current = map
 
-      try {
-        const map = new google.maps.Map(mapRef.current, {
-          center: { lat: pickup.lat, lng: pickup.lng },
-          zoom: 15,
-          disableDefaultUI: true,
-          gestureHandling: 'greedy',
-          keyboardShortcuts: false,
-          clickableIcons: false,
-          styles: MAP_STYLES,
-        })
-        mapInstanceRef.current = map
+      directionsServiceRef.current = new google.maps.DirectionsService()
+      directionsRendererRef.current = new google.maps.DirectionsRenderer({
+        map,
+        suppressMarkers: true,
+        polylineOptions: { strokeColor: '#F59E0B', strokeWeight: 6, strokeOpacity: 0.9 },
+      })
 
-        directionsServiceRef.current = new google.maps.DirectionsService()
-        directionsRendererRef.current = new google.maps.DirectionsRenderer({
-          map,
-          suppressMarkers: true,
-          polylineOptions: { strokeColor: '#F59E0B', strokeWeight: 6, strokeOpacity: 0.9 },
-        })
-
-        // User location marker
-        userMarkerRef.current = new google.maps.Circle({
-          map, center: { lat: pickup.lat, lng: pickup.lng }, radius: 12,
-          fillColor: '#F59E0B', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3, zIndex: 999,
-        })
-        new google.maps.Circle({
-          map, center: { lat: pickup.lat, lng: pickup.lng }, radius: 40,
-          fillColor: '#F59E0B', fillOpacity: 0.15, strokeColor: '#F59E0B', strokeWeight: 1, strokeOpacity: 0.3, zIndex: 998,
-        })
-      } catch (err) {
-        console.error('Map initialization error:', err)
-        setMapError('Failed to initialize map. Please refresh the page.')
-      }
+      // User location marker
+      userMarkerRef.current = new google.maps.Circle({
+        map, center: { lat: pickup.lat, lng: pickup.lng }, radius: 12,
+        fillColor: '#F59E0B', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3, zIndex: 999,
+      })
+      new google.maps.Circle({
+        map, center: { lat: pickup.lat, lng: pickup.lng }, radius: 40,
+        fillColor: '#F59E0B', fillOpacity: 0.15, strokeColor: '#F59E0B', strokeWeight: 1, strokeOpacity: 0.3, zIndex: 998,
+      })
+    } catch (err) {
+      console.error('Map initialization error:', err)
+      setMapError('Failed to initialize map. Please refresh the page.')
     }
-
-    // Check if Google Maps is ready using the callback flag
-    const isGoogleMapsReady = () => {
-      return (
-        typeof google !== 'undefined' && 
-        typeof google.maps?.Map === 'function' && 
-        (window as any).googleMapsReady === true
-      )
-    }
-
-    if (isGoogleMapsReady()) {
-      initMap()
-    } else {
-      let attempts = 0
-      const maxAttempts = 150 // 15 seconds max
-      const check = setInterval(() => { 
-        attempts++
-        if (isGoogleMapsReady()) { 
-          clearInterval(check)
-          initMap() 
-        } else if (attempts >= maxAttempts) {
-          clearInterval(check)
-          setMapError('Google Maps failed to load. Please check your internet connection and try again.')
-        }
-      }, 100)
-      return () => clearInterval(check)
-    }
-  }, [pickup, screen])
+  }, [mapsReady, pickup, screen])
 
   // Real road routing
   useEffect(() => {
@@ -371,6 +425,7 @@ export default function Home() {
     
     const selectedOption = RIDE_OPTIONS.find(r => r.id === selectedRide)
     const fare = parseFloat(calculatePrice(estimatedDistance, selectedOption?.multiplier || 1))
+    const fareCents = Math.round(fare * 100)
     setRideFare(fare)
     
     // Convert scheduled time to ISO format if scheduled
@@ -390,6 +445,12 @@ export default function Home() {
       pet_friendly: petFriendly,
     })
     
+    // Guard: ensure ride was created
+    if (!ride?.id) {
+      setAuthError('Could not create ride request. Please try again.')
+      return
+    }
+    
     setCurrentRideId(ride.id)
     
     // Don't charge for scheduled rides yet - charge at dispatch time
@@ -401,10 +462,25 @@ export default function Home() {
       return
     }
     
-    const result = await stripeApi('create-payment-intent', { customerId: stripeCustomerId, amount: fare, rideId: ride.id, paymentMethodId: selectedPaymentMethod })
+    // Generate idempotency key for payment
+    const idempotencyKey = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    
+    const result = await stripeApi('create-payment-intent', { 
+      customerId: stripeCustomerId, 
+      amount: fare,           // keep for compatibility
+      amountCents: fareCents, // preferred - avoids float issues
+      rideId: ride.id, 
+      paymentMethodId: selectedPaymentMethod,
+      idempotencyKey,
+    })
     
     if (result?.error) {
       setAuthError(result.error)
+      // Rollback: cancel the ride if payment auth fails
+      await cancelRide(ride.id).catch(() => {})
+      setCurrentRideId(null)
       return
     }
     
@@ -413,6 +489,9 @@ export default function Home() {
       simulateDriverSearch() 
     } else {
       setAuthError('Payment authorization failed. Please try again.')
+      // Rollback: cancel the ride if payment auth fails
+      await cancelRide(ride.id).catch(() => {})
+      setCurrentRideId(null)
     }
   }
 
@@ -510,7 +589,16 @@ export default function Home() {
 
   const handleAddTip = async (tip: number) => {
     setTipAmount(tip)
-    if (tip > 0 && currentRideId && selectedPaymentMethod) await stripeApi('charge-tip', { customerId: stripeCustomerId, amount: tip, paymentMethodId: selectedPaymentMethod })
+    const tipCents = Math.round(tip * 100)
+    if (tip > 0 && currentRideId && selectedPaymentMethod) {
+      await stripeApi('charge-tip', { 
+        customerId: stripeCustomerId, 
+        amount: tip,           // compatibility
+        amountCents: tipCents, // preferred
+        paymentMethodId: selectedPaymentMethod,
+        rideId: currentRideId,
+      })
+    }
   }
 
   const handleFinishRide = () => {
@@ -528,61 +616,119 @@ export default function Home() {
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
   }
 
-  // Subscribe to real messages when we have a ride
+  // Subscribe to real messages when we have a ride (works even when chat is closed)
   const chatChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
   
   useEffect(() => {
-    if (!currentRideId || !showChat) return
-    
-    // Load existing messages
-    getMessages(currentRideId).then(msgs => {
-      if (msgs.length > 0) {
+    if (!currentRideId || !user?.id) return
+
+    let cancelled = false
+
+    // Load history once per ride
+    getMessages(currentRideId)
+      .then((msgs) => {
+        if (cancelled) return
+        if (!msgs?.length) return
+
         const converted: ChatMessage[] = msgs.map(m => ({
           id: m.id,
-          sender: m.sender_id === user?.id ? 'rider' : 'driver',
+          sender: m.sender_id === user.id ? 'rider' : 'driver',
           text: m.content,
           timestamp: new Date(m.created_at),
-          status: m.read_at ? 'read' : 'delivered'
+          status: m.read_at ? 'read' : 'delivered',
         }))
+
         setChatMessages(converted)
-        markRead(currentRideId)
-        scrollToBottom()
-      }
-    }).catch(console.error)
-    
-    // Subscribe to new messages
+
+        if (showChatRef.current) {
+          markRead(currentRideId).catch(console.error)
+          setUnreadCount(0)
+          scrollToBottom()
+        }
+      })
+      .catch(console.error)
+
+    // Subscribe to new messages (stays subscribed even when chat modal is closed)
     const channel = subscribeToMessages(
       currentRideId,
       (msg) => {
-        const converted: ChatMessage = {
+        const isSelf = msg.sender_id === userIdRef.current
+
+        // Convert incoming db message
+        const incoming: ChatMessage = {
           id: msg.id,
-          sender: msg.sender_id === user?.id ? 'rider' : 'driver',
+          sender: isSelf ? 'rider' : 'driver',
           text: msg.content,
           timestamp: new Date(msg.created_at),
-          status: msg.read_at ? 'read' : 'delivered'
+          status: msg.read_at ? 'read' : 'delivered',
         }
-        setChatMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, converted])
-        markRead(currentRideId)
-        scrollToBottom()
-        if (!showChat && msg.sender_id !== user?.id) {
-          setUnreadCount(prev => prev + 1)
-          if (navigator.vibrate) navigator.vibrate(50)
+
+        setChatMessages((prev) => {
+          // Hard dedupe by id
+          if (prev.some(m => m.id === msg.id)) return prev
+
+          // If this is our own message coming back from realtime, replace the optimistic one
+          if (isSelf) {
+            const nowTs = new Date(msg.created_at).getTime()
+            const idxFromEnd = [...prev].reverse().findIndex(m =>
+              m.sender === 'rider' &&
+              m.text === msg.content &&
+              (m.status === 'sending' || m.status === 'sent') &&
+              Math.abs(nowTs - m.timestamp.getTime()) < 15000
+            )
+            if (idxFromEnd !== -1) {
+              const realIndex = prev.length - 1 - idxFromEnd
+              const copy = prev.slice()
+              copy[realIndex] = { ...copy[realIndex], ...incoming }
+              return copy
+            }
+          }
+
+          return [...prev, incoming]
+        })
+
+        // Unread + read receipts behavior
+        if (!isSelf) {
+          if (showChatRef.current) {
+            markRead(currentRideId).catch(console.error)
+            setUnreadCount(0)
+            scrollToBottom()
+          } else {
+            setUnreadCount((c) => c + 1)
+            if (navigator.vibrate) navigator.vibrate(50)
+          }
+        } else {
+          // If we sent it and chat is open, keep things feeling instant
+          if (showChatRef.current) scrollToBottom()
         }
       },
       () => {
-        setIsTyping(true)
-        setTimeout(() => setIsTyping(false), 1500)
+        // typing indicator (only show if chat is open)
+        if (showChatRef.current) {
+          setIsTyping(true)
+          setTimeout(() => setIsTyping(false), 1500)
+        }
       }
     )
+
     chatChannelRef.current = channel
-    
+
     return () => {
+      cancelled = true
       if (chatChannelRef.current) {
         supabase.removeChannel(chatChannelRef.current)
         chatChannelRef.current = null
       }
     }
-  }, [currentRideId, showChat, user?.id])
+  }, [currentRideId, user?.id])
+
+  // Mark messages read when chat opens
+  useEffect(() => {
+    if (!currentRideId || !user?.id) return
+    if (!showChat) return
+    setUnreadCount(0)
+    markRead(currentRideId).catch(console.error)
+  }, [showChat, currentRideId, user?.id])
 
   const sendMessage = async () => {
     if (!chatInput.trim()) return

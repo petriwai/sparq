@@ -25,10 +25,22 @@ export default function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         <link rel="icon" href="/icon-192.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/icon-192.svg" />
-        {/* Define Google Maps callback FIRST - in head */}
-        <script dangerouslySetInnerHTML={{ __html: `window.initGoogleMaps = function() { window.googleMapsReady = true; console.log('Google Maps ready'); };` }} />
       </head>
       <body className="antialiased">
+        {/* Google Maps callback with event dispatch */}
+        <Script id="gmaps-callback" strategy="beforeInteractive">
+          {`
+            (function () {
+              window.googleMapsReady = false;
+              window.initGoogleMaps = function () {
+                window.googleMapsReady = true;
+                window.dispatchEvent(new Event('google-maps-ready'));
+                console.log('Google Maps ready');
+              };
+            })();
+          `}
+        </Script>
+        
         {/* Google Maps API - loads after callback is defined */}
         {mapsKey && (
           <Script

@@ -52,6 +52,13 @@ export default function DriverApp() {
   const [isTyping, setIsTyping] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  
+  // Refs for chat subscription (to access current values in callbacks)
+  const showChatRef = useRef(false)
+  const userIdRef = useRef<string | null>(null)
+  
+  useEffect(() => { showChatRef.current = showChat }, [showChat])
+  useEffect(() => { userIdRef.current = user?.id ?? null }, [user?.id])
 
   const mapRef = useRef<HTMLDivElement>(null)
 
@@ -254,63 +261,120 @@ export default function DriverApp() {
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
   }
 
-  // Subscribe to real messages when we have a ride
+  // Subscribe to real messages when we have a ride (works even when chat is closed)
   const chatChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
   
   useEffect(() => {
-    if (!currentRide?.id || !showChat) return
-    
+    if (!currentRide?.id || !user?.id) return
+
     const rideId = currentRide.id
-    
-    // Load existing messages
-    getMessages(rideId).then(msgs => {
-      if (msgs.length > 0) {
+    let cancelled = false
+
+    // Load history once per ride
+    getMessages(rideId)
+      .then((msgs) => {
+        if (cancelled) return
+        if (!msgs?.length) return
+
         const converted: ChatMessage[] = msgs.map(m => ({
           id: m.id,
-          sender: m.sender_id === user?.id ? 'driver' : 'rider',
+          sender: m.sender_id === user.id ? 'driver' : 'rider',
           text: m.content,
           timestamp: new Date(m.created_at),
-          status: m.read_at ? 'read' : 'delivered'
+          status: m.read_at ? 'read' : 'delivered',
         }))
+
         setChatMessages(converted)
-        markRead(rideId)
-        scrollToBottom()
-      }
-    }).catch(console.error)
-    
-    // Subscribe to new messages
+
+        if (showChatRef.current) {
+          markRead(rideId).catch(console.error)
+          setUnreadCount(0)
+          scrollToBottom()
+        }
+      })
+      .catch(console.error)
+
+    // Subscribe to new messages (stays subscribed even when chat modal is closed)
     const channel = subscribeToMessages(
       rideId,
       (msg) => {
-        const converted: ChatMessage = {
+        const isSelf = msg.sender_id === userIdRef.current
+
+        // Convert incoming db message
+        const incoming: ChatMessage = {
           id: msg.id,
-          sender: msg.sender_id === user?.id ? 'driver' : 'rider',
+          sender: isSelf ? 'driver' : 'rider',
           text: msg.content,
           timestamp: new Date(msg.created_at),
-          status: msg.read_at ? 'read' : 'delivered'
+          status: msg.read_at ? 'read' : 'delivered',
         }
-        setChatMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, converted])
-        markRead(rideId)
-        scrollToBottom()
-        if (!showChat && msg.sender_id !== user?.id) {
-          setUnreadCount(prev => prev + 1)
-          if (navigator.vibrate) navigator.vibrate(50)
+
+        setChatMessages((prev) => {
+          // Hard dedupe by id
+          if (prev.some(m => m.id === msg.id)) return prev
+
+          // If this is our own message coming back from realtime, replace the optimistic one
+          if (isSelf) {
+            const nowTs = new Date(msg.created_at).getTime()
+            const idxFromEnd = [...prev].reverse().findIndex(m =>
+              m.sender === 'driver' &&
+              m.text === msg.content &&
+              (m.status === 'sending' || m.status === 'sent') &&
+              Math.abs(nowTs - m.timestamp.getTime()) < 15000
+            )
+            if (idxFromEnd !== -1) {
+              const realIndex = prev.length - 1 - idxFromEnd
+              const copy = prev.slice()
+              copy[realIndex] = { ...copy[realIndex], ...incoming }
+              return copy
+            }
+          }
+
+          return [...prev, incoming]
+        })
+
+        // Unread + read receipts behavior
+        if (!isSelf) {
+          if (showChatRef.current) {
+            markRead(rideId).catch(console.error)
+            setUnreadCount(0)
+            scrollToBottom()
+          } else {
+            setUnreadCount((c) => c + 1)
+            if (navigator.vibrate) navigator.vibrate(50)
+          }
+        } else {
+          // If we sent it and chat is open, keep things feeling instant
+          if (showChatRef.current) scrollToBottom()
         }
       },
       () => {
-        setIsTyping(true)
-        setTimeout(() => setIsTyping(false), 1500)
+        // typing indicator (only show if chat is open)
+        if (showChatRef.current) {
+          setIsTyping(true)
+          setTimeout(() => setIsTyping(false), 1500)
+        }
       }
     )
+
     chatChannelRef.current = channel
-    
+
     return () => {
+      cancelled = true
       if (chatChannelRef.current) {
         supabase.removeChannel(chatChannelRef.current)
         chatChannelRef.current = null
       }
     }
-  }, [currentRide?.id, showChat, user?.id])
+  }, [currentRide?.id, user?.id])
+
+  // Mark messages read when chat opens
+  useEffect(() => {
+    if (!currentRide?.id || !user?.id) return
+    if (!showChat) return
+    setUnreadCount(0)
+    markRead(currentRide.id).catch(console.error)
+  }, [showChat, currentRide?.id, user?.id])
 
   const sendMessage = async () => {
     if (!chatInput.trim()) return

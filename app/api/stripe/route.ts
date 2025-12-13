@@ -178,7 +178,10 @@ export async function POST(request: NextRequest) {
       case 'create-payment-intent': {
         if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         
-        const { amount, rideId, paymentMethodId } = body
+        const { amount, amountCents, rideId, paymentMethodId, idempotencyKey } = body
+        
+        // Prefer amountCents if provided (more accurate), otherwise convert from dollars
+        const finalAmountCents = amountCents ?? Math.round(amount * 100)
         
         // Get customer ID from database
         const { data: profile } = await supabase
@@ -202,15 +205,22 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
         
-        const paymentIntent = await stripe.paymentIntents.create({
-          amount: Math.round(amount * 100),
+        // Create payment intent with optional idempotency key
+        const createOptions: Stripe.PaymentIntentCreateParams = {
+          amount: finalAmountCents,
           currency: 'usd',
           customer: profile.stripe_customer_id,
           payment_method: paymentMethodId,
           capture_method: 'manual',
           confirm: true,
           return_url: `${process.env.NEXT_PUBLIC_APP_URL}/`
-        })
+        }
+        
+        const requestOptions: Stripe.RequestOptions = idempotencyKey 
+          ? { idempotencyKey } 
+          : {}
+        
+        const paymentIntent = await stripe.paymentIntents.create(createOptions, requestOptions)
 
         await supabase
           .from('rides')
@@ -264,7 +274,10 @@ export async function POST(request: NextRequest) {
       case 'charge-tip': {
         if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         
-        const { amount, paymentMethodId } = body
+        const { amount, amountCents, paymentMethodId, rideId } = body
+        
+        // Prefer amountCents if provided (more accurate), otherwise convert from dollars
+        const finalAmountCents = amountCents ?? Math.round(amount * 100)
         
         // Get customer ID from database
         const { data: profile } = await supabase
@@ -278,12 +291,13 @@ export async function POST(request: NextRequest) {
         }
         
         const paymentIntent = await stripe.paymentIntents.create({
-          amount: Math.round(amount * 100),
+          amount: finalAmountCents,
           currency: 'usd',
           customer: profile.stripe_customer_id,
           payment_method: paymentMethodId,
           confirm: true,
-          return_url: `${process.env.NEXT_PUBLIC_APP_URL}/`
+          return_url: `${process.env.NEXT_PUBLIC_APP_URL}/`,
+          metadata: rideId ? { rideId, type: 'tip' } : { type: 'tip' }
         })
 
         return NextResponse.json({ status: paymentIntent.status })
