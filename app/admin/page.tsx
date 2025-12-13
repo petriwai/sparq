@@ -17,10 +17,19 @@ type Stats = {
   flaggedMessages: number
 }
 
+// Timeout wrapper to prevent hanging promises
+const withTimeout = <T,>(p: Promise<T>, ms = 5000): Promise<T> =>
+  Promise.race([
+    p,
+    new Promise<T>((_, rej) => setTimeout(() => rej(new Error('Request timed out')), ms))
+  ])
+
 export default function AdminPage() {
   const [user, setUser] = useState<User | null>(null)
   const [role, setRole] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadingData, setLoadingData] = useState(false) // In-flight guard for polling
+  const [debugInfo, setDebugInfo] = useState<string>('')
 
   // Data
   const [stats, setStats] = useState<Stats | null>(null)
@@ -39,85 +48,139 @@ export default function AdminPage() {
   const [password, setPassword] = useState('')
 
   useEffect(() => {
+    let mounted = true
+    
     const checkAuth = async () => {
+      const debug: string[] = ['Starting auth check...']
+      
       try {
-        const { data, error: sessionError } = await supabase.auth.getSession()
+        debug.push('Calling getSession with 5s timeout...')
+        const { data: { session }, error: sessionError } = await withTimeout(
+          supabase.auth.getSession(),
+          5000
+        )
+        
+        if (!mounted) return
         
         if (sessionError) {
-          console.error('Session error:', sessionError.message)
+          debug.push(`Session error: ${sessionError.message}`)
           setUser(null)
           setRole(null)
           return
         }
         
-        const u = data.session?.user ?? null
-        setUser(u)
+        const currentUser = session?.user ?? null
+        debug.push(`Session exists: ${!!session}, User: ${!!currentUser}`)
         
-        if (u) {
-          // Try to get role - if column doesn't exist or RLS blocks, default to null
-          const { data: prof, error: profError } = await supabase
+        setUser(currentUser)
+        
+        // Deterministically set role to null when no user
+        if (!currentUser) {
+          debug.push('No user - setting role to null')
+          setRole(null)
+          return
+        }
+        
+        debug.push(`User ID: ${currentUser.id}`)
+        debug.push('Fetching profile role...')
+        
+        const { data: profile, error: profileError } = await withTimeout(
+          supabase
             .from('profiles')
             .select('role')
-            .eq('id', u.id)
-            .single()
-          
-          if (profError) {
-            console.error('Profile error:', profError.message)
-            // Check if it's a "column doesn't exist" error
-            if (profError.message.includes('role')) {
-              setError('Please run the admin SQL migration to add the role column')
-            }
-            setRole(null)
-          } else {
-            setRole(prof?.role ?? 'rider')
-          }
+            .eq('id', currentUser.id)
+            .single(),
+          5000
+        )
+        
+        // Check mounted again after await
+        if (!mounted) return
+        
+        if (profileError) {
+          debug.push(`Profile error: ${profileError.message} (code: ${profileError.code})`)
+          setRole('rider') // Default to rider
+        } else {
+          debug.push(`Profile role: ${profile?.role}`)
+          setRole(profile?.role ?? 'rider')
         }
+        
       } catch (err: any) {
-        console.error('Auth check exception:', err)
-        setUser(null)
-        setRole(null)
+        debug.push(`Exception: ${err.message}`)
+        console.error('Auth check failed:', err)
+        if (mounted) {
+          setUser(null)
+          setRole(null)
+        }
       } finally {
-        // ALWAYS stop loading, no matter what
-        setLoading(false)
+        debug.push('Auth check complete')
+        if (mounted) {
+          setDebugInfo(debug.join('\n'))
+          setLoading(false)
+        }
       }
     }
 
     checkAuth()
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_evt, session) => {
-      const u = session?.user ?? null
-      setUser(u)
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted) return
       
-      if (u) {
-        try {
-          const { data: prof } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', u.id)
-            .single()
-          setRole(prof?.role ?? null)
-        } catch {
-          setRole(null)
-        }
-      } else {
+      const currentUser = session?.user ?? null
+      setUser(currentUser)
+      
+      if (!currentUser) {
         setRole(null)
+        setLoading(false)
+        return
       }
-      setLoading(false)
+      
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', currentUser.id)
+          .single()
+        
+        // Check mounted after await
+        if (!mounted) return
+        setRole(data?.role ?? 'rider')
+      } catch {
+        if (mounted) setRole('rider')
+      }
+      
+      if (mounted) setLoading(false)
     })
 
-    return () => sub.subscription.unsubscribe()
+    return () => {
+      mounted = false
+      sub?.subscription?.unsubscribe()
+    }
   }, [])
 
   const isAdmin = role === 'admin'
 
   async function signIn() {
     setError('')
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) setError(error.message)
+    setLoading(true)
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) {
+        setError(error.message)
+        setLoading(false)
+      }
+      // onAuthStateChange handles success
+    } catch (e: any) {
+      setError(e.message)
+      setLoading(false)
+    }
   }
 
   async function loadAll() {
+    // In-flight guard - prevent overlapping calls
+    if (loadingData) return
+    setLoadingData(true)
     setError('')
+    
     try {
       const [s, r, d, m] = await Promise.all([
         adminApi.getStats(),
@@ -130,14 +193,17 @@ export default function AdminPage() {
       setDrivers(d)
       setFlaggedMessages(m)
     } catch (e: any) {
-      setError(e.message)
+      console.error('Load error:', e)
+      setError(e.message || 'Failed to load data')
+    } finally {
+      setLoadingData(false)
     }
   }
 
   useEffect(() => {
     if (!isAdmin) return
     loadAll()
-    const t = setInterval(loadAll, 10000) // Refresh every 10s
+    const t = setInterval(loadAll, 10000)
     return () => clearInterval(t)
   }, [isAdmin])
 
@@ -178,22 +244,24 @@ export default function AdminPage() {
     }
   }
 
-  // Loading state
+  // ============ RENDERING ============
+
+  // Loading State - Full screen overlay
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center">
+      <div className="fixed inset-0 z-[100] bg-slate-950 flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-slate-400">Loading...</p>
+          <p className="text-slate-400">Loading Admin Portal...</p>
         </div>
       </div>
     )
   }
 
-  // Not signed in
+  // Not Signed In - Show Login Form
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-6">
+      <div className="fixed inset-0 z-[100] bg-slate-950 text-slate-200 flex items-center justify-center p-6 overflow-y-auto">
         <div className="w-full max-w-md bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-2xl p-8">
           <div className="text-center mb-8">
             <div className="w-16 h-16 bg-gradient-to-br from-amber-400 to-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -231,37 +299,66 @@ export default function AdminPage() {
           >
             Sign In
           </button>
+          
+          {/* Debug info */}
+          {debugInfo && (
+            <details className="mt-4 text-xs text-slate-500">
+              <summary className="cursor-pointer">Debug Info</summary>
+              <pre className="mt-2 p-2 bg-slate-900 rounded overflow-x-auto">{debugInfo}</pre>
+            </details>
+          )}
         </div>
       </div>
     )
   }
 
-  // Not admin
+  // Signed In but Not Admin
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-6">
+      <div className="fixed inset-0 z-[100] bg-slate-950 text-slate-200 flex items-center justify-center p-6">
         <div className="w-full max-w-md bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-2xl p-8 text-center">
           <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
             <span className="text-3xl">🚫</span>
           </div>
           <h1 className="text-2xl font-black text-white mb-2">Access Denied</h1>
-          <p className="text-slate-400 mb-6">
+          <p className="text-slate-400 mb-2">
             Your account ({user.email}) does not have admin privileges.
           </p>
+          <p className="text-slate-500 text-sm mb-6">
+            Current role: <code className="bg-slate-800 px-2 py-1 rounded">{role || 'none'}</code>
+          </p>
+          
+          <div className="bg-slate-800/50 rounded-xl p-4 mb-6 text-left text-sm">
+            <p className="text-slate-300 font-medium mb-2">To get admin access:</p>
+            <ol className="text-slate-400 space-y-1 list-decimal list-inside">
+              <li>Go to Supabase SQL Editor</li>
+              <li>Run the admin-setup.sql migration</li>
+              <li>Update your profile role to admin</li>
+            </ol>
+          </div>
+          
           <button
             onClick={() => supabase.auth.signOut()}
             className="px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors"
           >
             Sign Out
           </button>
+          
+          {/* Debug info */}
+          {debugInfo && (
+            <details className="mt-4 text-xs text-slate-500 text-left">
+              <summary className="cursor-pointer">Debug Info</summary>
+              <pre className="mt-2 p-2 bg-slate-900 rounded overflow-x-auto">{debugInfo}</pre>
+            </details>
+          )}
         </div>
       </div>
     )
   }
 
-  // Admin Dashboard
+  // ============ ADMIN DASHBOARD ============
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200">
+    <div className="fixed inset-0 z-[100] bg-slate-950 text-slate-200 overflow-y-auto">
       {/* Header */}
       <header className="bg-slate-900/80 backdrop-blur-xl border-b border-slate-800 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -271,7 +368,7 @@ export default function AdminPage() {
             </div>
             <div>
               <h1 className="text-xl font-black text-white">Inoka Admin</h1>
-              <p className="text-slate-400 text-xs">Dispatch & Operations</p>
+              <p className="text-slate-400 text-xs">Dispatch and Operations</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -321,13 +418,43 @@ export default function AdminPage() {
         </div>
 
         {/* Overview Tab */}
-        {tab === 'overview' && stats && (
+        {tab === 'overview' && (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-            <StatCard label="Active Rides" value={stats.activeRides} icon="🚗" color="amber" />
-            <StatCard label="Today's Rides" value={stats.todayRides} icon="📅" color="blue" />
-            <StatCard label="Pending Drivers" value={stats.pendingDrivers} icon="⏳" color="yellow" />
-            <StatCard label="Flagged Messages" value={stats.flaggedMessages} icon="⚠️" color="red" />
-            <StatCard label="Total Revenue" value={`$${stats.totalRevenue.toFixed(2)}`} icon="💰" color="green" />
+            <div className="bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xl">🚗</span>
+                <span className="text-slate-400 text-sm">Active Rides</span>
+              </div>
+              <div className="text-2xl font-black text-white">{stats?.activeRides ?? 0}</div>
+            </div>
+            <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/10 border border-blue-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xl">📅</span>
+                <span className="text-slate-400 text-sm">Today</span>
+              </div>
+              <div className="text-2xl font-black text-white">{stats?.todayRides ?? 0}</div>
+            </div>
+            <div className="bg-gradient-to-br from-yellow-500/20 to-yellow-600/10 border border-yellow-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xl">⏳</span>
+                <span className="text-slate-400 text-sm">Pending Drivers</span>
+              </div>
+              <div className="text-2xl font-black text-white">{stats?.pendingDrivers ?? 0}</div>
+            </div>
+            <div className="bg-gradient-to-br from-red-500/20 to-red-600/10 border border-red-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xl">⚠️</span>
+                <span className="text-slate-400 text-sm">Flagged</span>
+              </div>
+              <div className="text-2xl font-black text-white">{stats?.flaggedMessages ?? 0}</div>
+            </div>
+            <div className="bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xl">💰</span>
+                <span className="text-slate-400 text-sm">Revenue</span>
+              </div>
+              <div className="text-2xl font-black text-white">${(stats?.totalRevenue ?? 0).toFixed(2)}</div>
+            </div>
           </div>
         )}
 
@@ -346,73 +473,45 @@ export default function AdminPage() {
                       <div className="text-white font-semibold truncate">
                         {ride.pickup_address} → {ride.dropoff_address}
                       </div>
-                      <div className="text-slate-400 text-sm mt-1 flex flex-wrap gap-x-4">
-                        <span>Status: <StatusBadge status={ride.status} /></span>
-                        <span>Fare: <span className="text-amber-400">${Number(ride.estimated_fare || 0).toFixed(2)}</span></span>
-                        {ride.scheduled_for && (
-                          <span>Scheduled: {new Date(ride.scheduled_for).toLocaleString()}</span>
-                        )}
+                      <div className="text-slate-400 text-sm mt-1">
+                        Status: <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          ride.status === 'requested' ? 'bg-blue-500/20 text-blue-400' :
+                          ride.status === 'in-progress' ? 'bg-amber-500/20 text-amber-400' :
+                          'bg-slate-500/20 text-slate-400'
+                        }`}>{ride.status}</span>
+                        {' • '}Fare: <span className="text-amber-400">${Number(ride.estimated_fare || 0).toFixed(2)}</span>
                       </div>
                       <div className="text-slate-500 text-xs mt-1">
-                        ID: {ride.id.slice(0, 8)}... • Created: {new Date(ride.created_at).toLocaleString()}
+                        ID: {ride.id.slice(0, 8)}...
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-2 justify-end">
-                      <button
-                        onClick={() => viewRideDetails(ride)}
-                        className="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm"
-                      >
-                        View
-                      </button>
-                      <button
-                        onClick={() => updateRideStatus(ride.id, 'cancelled')}
-                        className="px-3 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-lg text-sm"
-                      >
-                        Cancel
-                      </button>
-                      {ride.status === 'accepted' && (
-                        <button
-                          onClick={() => updateRideStatus(ride.id, 'in-progress')}
-                          className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded-lg text-sm"
-                        >
-                          Start
-                        </button>
-                      )}
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => viewRideDetails(ride)} className="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">View</button>
+                      <button onClick={() => updateRideStatus(ride.id, 'cancelled')} className="px-3 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-lg text-sm">Cancel</button>
                       {ride.status === 'in-progress' && (
-                        <button
-                          onClick={() => updateRideStatus(ride.id, 'completed')}
-                          className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-bold"
-                        >
-                          Complete
-                        </button>
+                        <button onClick={() => updateRideStatus(ride.id, 'completed')} className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-bold">Complete</button>
                       )}
                     </div>
                   </div>
-                  {(ride.status === 'requested' || ride.status === 'scheduled') && (
+                  {(ride.status === 'requested' || ride.status === 'scheduled') && drivers.length > 0 && (
                     <div className="flex items-center gap-3 pt-3 border-t border-slate-800">
-                      <span className="text-slate-400 text-sm">Assign driver:</span>
+                      <span className="text-slate-400 text-sm">Assign:</span>
                       <select
                         className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm flex-1 max-w-xs"
                         defaultValue=""
                         onChange={(e) => e.target.value && assignDriver(ride.id, e.target.value)}
                       >
                         <option value="" disabled>Select driver...</option>
-                        {drivers
-                          .filter((d) => d.status === 'approved' || d.status === 'active')
-                          .map((d) => (
-                            <option key={d.user_id} value={d.user_id}>
-                              {d.name || 'Driver'} ({d.status})
-                            </option>
-                          ))}
+                        {drivers.filter(d => d.status === 'approved' || d.status === 'active').map((d) => (
+                          <option key={d.user_id} value={d.user_id}>{d.name || 'Driver'}</option>
+                        ))}
                       </select>
                     </div>
                   )}
                 </div>
               ))}
               {rides.filter(r => r.status !== 'completed' && r.status !== 'cancelled').length === 0 && (
-                <div className="p-12 text-center text-slate-400">
-                  No active rides right now.
-                </div>
+                <div className="p-12 text-center text-slate-400">No active rides.</div>
               )}
             </div>
           </div>
@@ -426,87 +525,47 @@ export default function AdminPage() {
             </div>
             <div className="divide-y divide-slate-800">
               {drivers.map((driver) => (
-                <div key={driver.user_id} className="p-5 flex items-center justify-between gap-4 hover:bg-slate-800/30 transition-colors">
-                  <div className="min-w-0 flex-1">
+                <div key={driver.user_id} className="p-5 flex items-center justify-between gap-4">
+                  <div>
                     <div className="text-white font-semibold">{driver.name || 'Unnamed Driver'}</div>
                     <div className="text-slate-400 text-sm">
-                      License: {driver.license_number || 'N/A'} • Status: <StatusBadge status={driver.status} />
+                      License: {driver.license_number || 'N/A'} • Status: <span className={`px-2 py-0.5 rounded text-xs ${
+                        driver.status === 'approved' ? 'bg-emerald-500/20 text-emerald-400' :
+                        driver.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-red-500/20 text-red-400'
+                      }`}>{driver.status}</span>
                     </div>
-                    <div className="text-slate-500 text-xs truncate">ID: {driver.user_id}</div>
                   </div>
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => updateDriverStatus(driver.user_id, 'approved')}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        driver.status === 'approved'
-                          ? 'bg-emerald-500 text-white'
-                          : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400'
-                      }`}
-                    >
-                      ✓ Approve
-                    </button>
-                    <button
-                      onClick={() => updateDriverStatus(driver.user_id, 'pending')}
-                      className={`px-4 py-2 rounded-lg text-sm transition-colors ${
-                        driver.status === 'pending'
-                          ? 'bg-yellow-500 text-white'
-                          : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-                      }`}
-                    >
-                      Pending
-                    </button>
-                    <button
-                      onClick={() => updateDriverStatus(driver.user_id, 'suspended')}
-                      className={`px-4 py-2 rounded-lg text-sm transition-colors ${
-                        driver.status === 'suspended'
-                          ? 'bg-red-500 text-white'
-                          : 'bg-red-600/20 hover:bg-red-600/30 text-red-400'
-                      }`}
-                    >
-                      Suspend
-                    </button>
+                    <button onClick={() => updateDriverStatus(driver.user_id, 'approved')} className="px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg text-sm">Approve</button>
+                    <button onClick={() => updateDriverStatus(driver.user_id, 'suspended')} className="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded-lg text-sm">Suspend</button>
                   </div>
                 </div>
               ))}
               {drivers.length === 0 && (
-                <div className="p-12 text-center text-slate-400">
-                  No drivers registered yet.
-                </div>
+                <div className="p-12 text-center text-slate-400">No drivers registered.</div>
               )}
             </div>
           </div>
         )}
 
-        {/* Flagged Messages Tab */}
+        {/* Messages Tab */}
         {tab === 'messages' && (
           <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-2xl overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-800">
-              <h2 className="text-white font-bold">Flagged Messages (Profanity Filter)</h2>
+              <h2 className="text-white font-bold">Flagged Messages</h2>
             </div>
             <div className="divide-y divide-slate-800">
               {flaggedMessages.map((msg) => (
-                <div key={msg.id} className="p-5 hover:bg-slate-800/30 transition-colors">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 bg-red-500/20 rounded-full flex items-center justify-center flex-shrink-0">
-                      <span>⚠️</span>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-white bg-slate-800 rounded-lg p-3 mb-2">
-                        {msg.content}
-                      </div>
-                      <div className="text-slate-400 text-sm">
-                        Ride: {msg.ride_id?.slice(0, 8)}... • 
-                        Sender: {msg.sender_id?.slice(0, 8)}... • 
-                        {new Date(msg.created_at).toLocaleString()}
-                      </div>
-                    </div>
+                <div key={msg.id} className="p-5">
+                  <div className="bg-slate-800 rounded-lg p-3 mb-2 text-white">{msg.content}</div>
+                  <div className="text-slate-400 text-sm">
+                    Ride: {msg.ride_id?.slice(0, 8)}... • {new Date(msg.created_at).toLocaleString()}
                   </div>
                 </div>
               ))}
               {flaggedMessages.length === 0 && (
-                <div className="p-12 text-center text-slate-400">
-                  No flagged messages. All clear! ✓
-                </div>
+                <div className="p-12 text-center text-slate-400">No flagged messages. ✓</div>
               )}
             </div>
           </div>
@@ -515,65 +574,29 @@ export default function AdminPage() {
 
       {/* Ride Details Modal */}
       {selectedRide && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
               <h3 className="text-white font-bold">Ride Details</h3>
-              <button
-                onClick={() => { setSelectedRide(null); setRideChat([]) }}
-                className="text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
+              <button onClick={() => { setSelectedRide(null); setRideChat([]) }} className="text-slate-400 hover:text-white text-xl">✕</button>
             </div>
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
               <div className="grid grid-cols-2 gap-4 mb-6">
-                <div>
-                  <div className="text-slate-400 text-sm">Pickup</div>
-                  <div className="text-white">{selectedRide.pickup_address}</div>
-                </div>
-                <div>
-                  <div className="text-slate-400 text-sm">Dropoff</div>
-                  <div className="text-white">{selectedRide.dropoff_address}</div>
-                </div>
-                <div>
-                  <div className="text-slate-400 text-sm">Status</div>
-                  <StatusBadge status={selectedRide.status} />
-                </div>
-                <div>
-                  <div className="text-slate-400 text-sm">Fare</div>
-                  <div className="text-amber-400 font-bold">${Number(selectedRide.estimated_fare || 0).toFixed(2)}</div>
-                </div>
-                <div>
-                  <div className="text-slate-400 text-sm">Rider ID</div>
-                  <div className="text-white text-sm font-mono">{selectedRide.rider_id}</div>
-                </div>
-                <div>
-                  <div className="text-slate-400 text-sm">Driver ID</div>
-                  <div className="text-white text-sm font-mono">{selectedRide.driver_id || 'Not assigned'}</div>
-                </div>
+                <div><div className="text-slate-400 text-sm">Pickup</div><div className="text-white">{selectedRide.pickup_address}</div></div>
+                <div><div className="text-slate-400 text-sm">Dropoff</div><div className="text-white">{selectedRide.dropoff_address}</div></div>
+                <div><div className="text-slate-400 text-sm">Status</div><div className="text-white">{selectedRide.status}</div></div>
+                <div><div className="text-slate-400 text-sm">Fare</div><div className="text-amber-400 font-bold">${Number(selectedRide.estimated_fare || 0).toFixed(2)}</div></div>
               </div>
-
               <div className="border-t border-slate-800 pt-4">
-                <h4 className="text-white font-bold mb-3">Chat Log ({rideChat.length} messages)</h4>
+                <h4 className="text-white font-bold mb-3">Chat Log ({rideChat.length})</h4>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {rideChat.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`p-3 rounded-lg ${
-                        msg.flagged ? 'bg-red-500/20 border border-red-500/30' : 'bg-slate-800'
-                      }`}
-                    >
+                    <div key={msg.id} className={`p-3 rounded-lg ${msg.flagged ? 'bg-red-500/20 border border-red-500/30' : 'bg-slate-800'}`}>
                       <div className="text-white text-sm">{msg.content}</div>
-                      <div className="text-slate-500 text-xs mt-1">
-                        {msg.sender_id?.slice(0, 8)}... • {new Date(msg.created_at).toLocaleTimeString()}
-                        {msg.flagged && <span className="text-red-400 ml-2">⚠️ Flagged</span>}
-                      </div>
+                      <div className="text-slate-500 text-xs mt-1">{new Date(msg.created_at).toLocaleTimeString()}</div>
                     </div>
                   ))}
-                  {rideChat.length === 0 && (
-                    <div className="text-slate-400 text-sm">No messages in this ride.</div>
-                  )}
+                  {rideChat.length === 0 && <div className="text-slate-400 text-sm">No messages.</div>}
                 </div>
               </div>
             </div>
@@ -581,48 +604,5 @@ export default function AdminPage() {
         </div>
       )}
     </div>
-  )
-}
-
-// Stat Card Component
-function StatCard({ label, value, icon, color }: { label: string; value: string | number; icon: string; color: string }) {
-  const colors: Record<string, string> = {
-    amber: 'from-amber-500/20 to-amber-600/10 border-amber-500/30',
-    blue: 'from-blue-500/20 to-blue-600/10 border-blue-500/30',
-    green: 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/30',
-    red: 'from-red-500/20 to-red-600/10 border-red-500/30',
-    yellow: 'from-yellow-500/20 to-yellow-600/10 border-yellow-500/30',
-  }
-
-  return (
-    <div className={`bg-gradient-to-br ${colors[color]} border rounded-xl p-4`}>
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-xl">{icon}</span>
-        <span className="text-slate-400 text-sm">{label}</span>
-      </div>
-      <div className="text-2xl font-black text-white">{value}</div>
-    </div>
-  )
-}
-
-// Status Badge Component
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    requested: 'bg-blue-500/20 text-blue-400',
-    scheduled: 'bg-purple-500/20 text-purple-400',
-    accepted: 'bg-yellow-500/20 text-yellow-400',
-    'in-progress': 'bg-amber-500/20 text-amber-400',
-    completed: 'bg-emerald-500/20 text-emerald-400',
-    cancelled: 'bg-red-500/20 text-red-400',
-    pending: 'bg-yellow-500/20 text-yellow-400',
-    approved: 'bg-emerald-500/20 text-emerald-400',
-    active: 'bg-emerald-500/20 text-emerald-400',
-    suspended: 'bg-red-500/20 text-red-400',
-  }
-
-  return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[status] || 'bg-slate-500/20 text-slate-400'}`}>
-      {status}
-    </span>
   )
 }
