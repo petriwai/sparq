@@ -214,6 +214,77 @@ export const translations = {
     quick_thanks: "Merci!",
     quick_coming: "J'arrive!",
   },
+  
+  pt: {
+    // Header & Auth
+    welcome: "Os Verdadeiros",
+    sign_in: "Entrar",
+    sign_out: "Sair",
+    
+    // Home Screen
+    where_to: "Para onde?",
+    search_destination: "Buscar destino...",
+    add_place: "Adicionar",
+    
+    // Ride Request
+    choose_ride: "Escolha uma corrida",
+    ride_type_standard: "Padrão",
+    ride_type_premium: "Premium",
+    ride_type_xl: "XL",
+    quiet_ride: "Corrida silenciosa",
+    pet_friendly: "Aceita pets",
+    schedule_later: "Agendar para depois",
+    confirm_ride: "Confirmar Inoka",
+    
+    // Payment
+    payment_required: "Pagamento Necessário",
+    add_payment_method: "Adicionar Forma de Pagamento",
+    payment_authorized: "Pagamento autorizado",
+    
+    // Searching
+    finding_driver: "Encontrando o motorista perfeito...",
+    cancel_request: "Cancelar Solicitação",
+    
+    // Driver Found
+    driver_found: "Motorista a caminho",
+    call: "Ligar",
+    message: "Mensagem",
+    cancel_ride: "Cancelar Corrida",
+    driver_will_start: "Seu motorista iniciará a corrida quando você embarcar",
+    
+    // In Ride
+    in_ride: "Em trânsito",
+    eta: "Chegada",
+    arrived: "Chegamos!",
+    
+    // Complete
+    ride_complete: "Corrida Finalizada!",
+    thanks_riding: "Obrigado por viajar com a Inoka",
+    ride_fare: "Valor da Corrida",
+    add_tip: "Adicionar gorjeta para",
+    tip_none: "Nenhuma",
+    total: "Total",
+    done: "Concluir",
+    
+    // Chat
+    type_message: "Digite uma mensagem...",
+    send: "Enviar",
+    
+    // Saved Places
+    save_place: "Salvar Local",
+    label_placeholder: "Nome (ex., Casa, Trabalho)",
+    
+    // Errors
+    location_error: "Não foi possível obter sua localização",
+    search_error: "Busca falhou",
+    payment_error: "Pagamento falhou",
+    
+    // Quick Replies
+    quick_here: "Estou aqui",
+    quick_waiting: "Esperando do lado de fora",
+    quick_thanks: "Obrigado!",
+    quick_coming: "Estou indo!",
+  },
 }
 
 export type Language = keyof typeof translations

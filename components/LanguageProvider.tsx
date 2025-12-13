@@ -16,6 +16,7 @@ const LANGUAGE_OPTIONS: { code: Language; name: string; flag: string }[] = [
   { code: 'en', name: 'English', flag: '🇺🇸' },
   { code: 'es', name: 'Español', flag: '🇪🇸' },
   { code: 'fr', name: 'Français', flag: '🇫🇷' },
+  { code: 'pt', name: 'Português', flag: '🇧🇷' },
 ]
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
