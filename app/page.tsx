@@ -188,7 +188,17 @@ export default function Home() {
         // If ride is "requested" but older than 30 minutes, auto-cancel it (stale)
         if (activeRide.status === 'requested' && rideAge > thirtyMinutes) {
           console.log('Auto-cancelling stale ride request:', activeRide.id)
-          await cancelRide(activeRide.id)
+          // Use direct update to avoid any constraint issues
+          const { error: cancelError } = await supabase
+            .from('rides')
+            .update({ status: 'cancelled' })
+            .eq('id', activeRide.id)
+            .eq('rider_id', userId) // Extra safety check
+          
+          if (cancelError) {
+            console.error('Failed to auto-cancel stale ride:', cancelError.message)
+            // Don't restore this ride, just ignore it
+          }
           return
         }
         
@@ -196,7 +206,15 @@ export default function Home() {
         const oneHour = 60 * 60 * 1000
         if (rideAge > oneHour && activeRide.status !== 'in-progress') {
           console.log('Ride too old to restore, cancelling:', activeRide.id)
-          await cancelRide(activeRide.id)
+          const { error: cancelError } = await supabase
+            .from('rides')
+            .update({ status: 'cancelled' })
+            .eq('id', activeRide.id)
+            .eq('rider_id', userId)
+          
+          if (cancelError) {
+            console.error('Failed to cancel old ride:', cancelError.message)
+          }
           return
         }
         
