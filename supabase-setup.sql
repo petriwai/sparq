@@ -281,6 +281,74 @@ grant execute on function public.mark_messages_read(uuid) to authenticated;
 alter publication supabase_realtime add table messages;
 
 -- ============================================================================
+-- ADMIN ROLE & POLICIES
+-- ============================================================================
+
+-- Add role column to profiles (rider, driver, admin)
+alter table public.profiles add column if not exists role text not null default 'rider';
+
+-- Helper function to check if user is admin
+create or replace function public.is_admin(uid uuid)
+returns boolean
+language sql
+stable
+security definer
+as $$
+  select exists (
+    select 1 from public.profiles p
+    where p.id = uid and p.role = 'admin'
+  );
+$$;
+
+-- Convenience function (no argument - uses auth.uid())
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+as $$
+  select public.is_admin(auth.uid());
+$$;
+
+-- Admins can view ALL rides
+drop policy if exists "admin_select_all_rides" on public.rides;
+create policy "admin_select_all_rides"
+on public.rides for select
+using (public.is_admin(auth.uid()));
+
+-- Admins can update ANY ride (assign driver, change status)
+drop policy if exists "admin_update_rides" on public.rides;
+create policy "admin_update_rides"
+on public.rides for update
+using (public.is_admin(auth.uid()))
+with check (public.is_admin(auth.uid()));
+
+-- Admins can view ALL drivers
+drop policy if exists "admin_select_all_drivers" on public.drivers;
+create policy "admin_select_all_drivers"
+on public.drivers for select
+using (public.is_admin(auth.uid()));
+
+-- Admins can update ANY driver (approve, suspend)
+drop policy if exists "admin_update_drivers" on public.drivers;
+create policy "admin_update_drivers"
+on public.drivers for update
+using (public.is_admin(auth.uid()))
+with check (public.is_admin(auth.uid()));
+
+-- Admins can view ALL messages (for dispute resolution)
+drop policy if exists "admin_select_all_messages" on public.messages;
+create policy "admin_select_all_messages"
+on public.messages for select
+using (public.is_admin(auth.uid()));
+
+-- Admins can view ALL profiles
+drop policy if exists "admin_select_all_profiles" on public.profiles;
+create policy "admin_select_all_profiles"
+on public.profiles for select
+using (public.is_admin(auth.uid()));
+
+-- ============================================================================
 -- ADD DRIVER_ID TO RIDES (for chat participant lookup)
 -- ============================================================================
 alter table public.rides add column if not exists driver_id uuid references auth.users(id) null;
