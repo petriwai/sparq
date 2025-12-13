@@ -100,7 +100,7 @@ export default function AdminPage() {
           .from('profiles')
           .select('role')
           .eq('id', currentUser.id)
-          .single()
+          .single() as { data: { role: string } | null; error: { message: string; code: string } | null }
         
         // Check mounted again after await
         if (!mounted) return
@@ -148,7 +148,7 @@ export default function AdminPage() {
           .from('profiles')
           .select('role')
           .eq('id', currentUser.id)
-          .single()
+          .single() as { data: { role: string } | null; error: unknown }
         
         // Check mounted after await
         if (!mounted) return
