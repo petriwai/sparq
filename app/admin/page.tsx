@@ -39,58 +39,74 @@ export default function AdminPage() {
   const [password, setPassword] = useState('')
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
-      const u = data.session?.user ?? null
-      setUser(u)
-      if (u) {
-        try {
-          const { data: prof, error } = await supabase
+    const checkAuth = async () => {
+      try {
+        const { data, error: sessionError } = await supabase.auth.getSession()
+        
+        if (sessionError) {
+          console.error('Session error:', sessionError.message)
+          setUser(null)
+          setRole(null)
+          return
+        }
+        
+        const u = data.session?.user ?? null
+        setUser(u)
+        
+        if (u) {
+          // Try to get role - if column doesn't exist or RLS blocks, default to null
+          const { data: prof, error: profError } = await supabase
             .from('profiles')
             .select('role')
             .eq('id', u.id)
             .single()
           
-          if (error) {
-            console.error('Profile fetch error:', error.message)
-            // If role column doesn't exist, default to null
+          if (profError) {
+            console.error('Profile error:', profError.message)
+            // Check if it's a "column doesn't exist" error
+            if (profError.message.includes('role')) {
+              setError('Please run the admin SQL migration to add the role column')
+            }
             setRole(null)
           } else {
-            setRole(prof?.role ?? null)
+            setRole(prof?.role ?? 'rider')
           }
-        } catch (e) {
-          console.error('Profile fetch exception:', e)
-          setRole(null)
         }
+      } catch (err: any) {
+        console.error('Auth check exception:', err)
+        setUser(null)
+        setRole(null)
+      } finally {
+        // ALWAYS stop loading, no matter what
+        setLoading(false)
       }
-      setLoading(false)
-    }).catch((e) => {
-      console.error('Session fetch error:', e)
-      setLoading(false)
-    })
+    }
+
+    checkAuth()
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (_evt, session) => {
       const u = session?.user ?? null
       setUser(u)
+      
       if (u) {
         try {
-          const { data: prof, error } = await supabase
+          const { data: prof } = await supabase
             .from('profiles')
             .select('role')
             .eq('id', u.id)
             .single()
-          
-          if (error) {
-            setRole(null)
-          } else {
-            setRole(prof?.role ?? null)
-          }
+          setRole(prof?.role ?? null)
         } catch {
           setRole(null)
         }
       } else {
         setRole(null)
       }
+      setLoading(false)
     })
+
+    return () => sub.subscription.unsubscribe()
+  }, [])
 
     return () => sub.subscription.unsubscribe()
   }, [])
