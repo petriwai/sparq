@@ -182,6 +182,16 @@ export default function Home() {
 
   // Auth listener
   useEffect(() => {
+    // Check for password recovery token in URL hash and redirect
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash
+      if (hash && hash.includes('type=recovery')) {
+        // Redirect to reset-password page with the hash
+        window.location.href = `/reset-password${hash}`
+        return
+      }
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
       if (session?.user) { 
@@ -193,7 +203,13 @@ export default function Home() {
         setLoadingPayments(false)
       }
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // If password recovery event, redirect to reset page
+      if (event === 'PASSWORD_RECOVERY') {
+        window.location.href = '/reset-password'
+        return
+      }
+      
       setUser(session?.user ?? null)
       if (session?.user) { 
         loadSavedPlaces(session.user.id)
