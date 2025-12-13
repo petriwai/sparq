@@ -43,13 +43,28 @@ export default function AdminPage() {
       const u = data.session?.user ?? null
       setUser(u)
       if (u) {
-        const { data: prof } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', u.id)
-          .single()
-        setRole(prof?.role ?? null)
+        try {
+          const { data: prof, error } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', u.id)
+            .single()
+          
+          if (error) {
+            console.error('Profile fetch error:', error.message)
+            // If role column doesn't exist, default to null
+            setRole(null)
+          } else {
+            setRole(prof?.role ?? null)
+          }
+        } catch (e) {
+          console.error('Profile fetch exception:', e)
+          setRole(null)
+        }
       }
+      setLoading(false)
+    }).catch((e) => {
+      console.error('Session fetch error:', e)
       setLoading(false)
     })
 
@@ -57,12 +72,21 @@ export default function AdminPage() {
       const u = session?.user ?? null
       setUser(u)
       if (u) {
-        const { data: prof } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', u.id)
-          .single()
-        setRole(prof?.role ?? null)
+        try {
+          const { data: prof, error } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', u.id)
+            .single()
+          
+          if (error) {
+            setRole(null)
+          } else {
+            setRole(prof?.role ?? null)
+          }
+        } catch {
+          setRole(null)
+        }
       } else {
         setRole(null)
       }
