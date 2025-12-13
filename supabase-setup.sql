@@ -217,13 +217,27 @@ with check (
 revoke update on public.messages from authenticated;
 
 -- ============================================================================
--- CONTENT MODERATION (Basic profanity filter)
+-- CONTENT MODERATION (Profanity filter function + trigger)
 -- ============================================================================
+
+-- Reusable function to check for profanity (can be used in RLS policies too)
+create or replace function public.contains_profanity(text_content text)
+returns boolean
+language plpgsql
+immutable
+as $$
+begin
+  -- Customize this word list for production
+  -- Using word boundaries (\m and \M) to avoid false positives
+  return text_content ~* '\m(fuck|shit|bitch|dick|pussy|cock|cunt|nigger|faggot)\M';
+end;
+$$;
+
+-- Trigger to flag messages (still allows insert, just marks for review)
 create or replace function flag_inappropriate_messages()
 returns trigger as $$
 begin
-  -- Basic filter - expand regex pattern as needed for production
-  if new.content ~* '\m(fuck|shit|ass|bitch|dick|pussy|cock|cunt)\M' then
+  if public.contains_profanity(new.content) then
     new.flagged = true;
   end if;
   return new;
@@ -274,15 +288,24 @@ alter table public.rides add column if not exists driver_id uuid references auth
 -- IMPORTANT: First create bucket "chat-audio" in Dashboard > Storage (set to PRIVATE)
 -- Then run these policies:
 
--- Allow ride participants to upload voice files
+-- Robust Upload Policy - enforces path structure: ride_id/user_id/filename.webm
 create policy "Allow ride participants to upload audio"
 on storage.objects for insert
 to authenticated
 with check (
   bucket_id = 'chat-audio'
+  -- Enforce EXACTLY 2 folder levels: ride_id/user_id/filename
+  and array_length(storage.foldername(name), 1) = 2
+  -- First folder must be non-null
+  and (storage.foldername(name))[1] is not null
+  -- Second folder MUST be the authenticated user's ID (prevents spoofing)
+  and (storage.foldername(name))[2] = auth.uid()::text
+  -- Only allow .webm audio files
+  and name ~* '\.webm$'
+  -- User must be participant in an active ride
   and exists (
     select 1 from public.rides r
-    where r.id::text = (storage.foldername(name))[1]
+    where r.id::text = (storage.foldername(name))[1]  -- First folder = ride ID
       and (r.rider_id = auth.uid() or r.driver_id = auth.uid())
       and r.status not in ('completed', 'cancelled')
   )
