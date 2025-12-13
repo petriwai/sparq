@@ -75,6 +75,7 @@ export async function POST(request: NextRequest) {
       'get-payment-methods',
       'delete-payment-method',
       'create-payment-intent',
+      'cancel-payment-intent',
       'capture-payment',
       'charge-tip'
     ]
@@ -236,6 +237,45 @@ export async function POST(request: NextRequest) {
         })
       }
 
+      case 'cancel-payment-intent': {
+        if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        
+        const { rideId } = body
+        
+        // Verify the ride belongs to this user
+        const { data: ride } = await supabase
+          .from('rides')
+          .select('payment_intent_id, payment_status, rider_id')
+          .eq('id', rideId)
+          .single()
+
+        if (!ride || ride.rider_id !== user.id) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Only cancel if there's a payment intent and it hasn't been captured
+        if (ride?.payment_intent_id && ride.payment_status !== 'captured') {
+          try {
+            const paymentIntent = await stripe.paymentIntents.cancel(ride.payment_intent_id)
+            
+            await supabase
+              .from('rides')
+              .update({ payment_status: 'cancelled' })
+              .eq('id', rideId)
+
+            return NextResponse.json({ status: paymentIntent.status })
+          } catch (err: any) {
+            // If already cancelled or captured, that's fine
+            if (err.code === 'payment_intent_unexpected_state') {
+              return NextResponse.json({ status: 'already_finalized' })
+            }
+            throw err
+          }
+        }
+        
+        return NextResponse.json({ status: 'no_payment_intent' })
+      }
+
       case 'capture-payment': {
         if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         
@@ -244,7 +284,7 @@ export async function POST(request: NextRequest) {
         // Verify the ride belongs to this user
         const { data: ride } = await supabase
           .from('rides')
-          .select('payment_intent_id, estimated_fare, rider_id')
+          .select('payment_intent_id, payment_status, estimated_fare, rider_id')
           .eq('id', rideId)
           .single()
 
@@ -252,20 +292,37 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        // Idempotency: If already captured, return success
+        if (ride.payment_status === 'captured') {
+          return NextResponse.json({ status: 'already_captured' })
+        }
+
         if (ride?.payment_intent_id) {
-          const paymentIntent = await stripe.paymentIntents.capture(
-            ride.payment_intent_id
-          )
+          try {
+            const paymentIntent = await stripe.paymentIntents.capture(
+              ride.payment_intent_id
+            )
 
-          await supabase
-            .from('rides')
-            .update({ 
-              payment_status: 'captured',
-              paid_amount: ride.estimated_fare
-            })
-            .eq('id', rideId)
+            await supabase
+              .from('rides')
+              .update({ 
+                payment_status: 'captured',
+                paid_amount: ride.estimated_fare
+              })
+              .eq('id', rideId)
 
-          return NextResponse.json({ status: paymentIntent.status })
+            return NextResponse.json({ status: paymentIntent.status })
+          } catch (err: any) {
+            // If already captured, that's fine (idempotent)
+            if (err.code === 'payment_intent_unexpected_state') {
+              await supabase
+                .from('rides')
+                .update({ payment_status: 'captured' })
+                .eq('id', rideId)
+              return NextResponse.json({ status: 'already_captured' })
+            }
+            throw err
+          }
         }
         
         return NextResponse.json({ error: 'No payment intent found' }, { status: 400 })
@@ -279,7 +336,12 @@ export async function POST(request: NextRequest) {
         // Prefer amountCents if provided (more accurate), otherwise convert from dollars
         const finalAmountCents = amountCents ?? Math.round(amount * 100)
         
-        // Get customer ID from database
+        // If no tip or zero tip, just return success
+        if (finalAmountCents <= 0) {
+          return NextResponse.json({ status: 'no_tip' })
+        }
+        
+        // Get customer ID and verify ride ownership
         const { data: profile } = await supabase
           .from('profiles')
           .select('stripe_customer_id')
@@ -288,6 +350,33 @@ export async function POST(request: NextRequest) {
         
         if (!profile?.stripe_customer_id) {
           return NextResponse.json({ error: 'No Stripe customer found' }, { status: 400 })
+        }
+        
+        // Check if tip was already charged for this ride
+        if (rideId) {
+          const { data: ride } = await supabase
+            .from('rides')
+            .select('tip_amount, tip_payment_id, rider_id')
+            .eq('id', rideId)
+            .single()
+          
+          if (!ride || ride.rider_id !== user.id) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+          }
+          
+          // If tip already charged for exact same amount, return success (idempotent)
+          if (ride.tip_payment_id && ride.tip_amount === finalAmountCents / 100) {
+            return NextResponse.json({ status: 'already_charged' })
+          }
+          
+          // If tip already charged but different amount, don't allow change
+          // (In production, you might refund and recharge, but for MVP, prevent double-charge)
+          if (ride.tip_payment_id) {
+            return NextResponse.json({ 
+              error: 'Tip already charged. Cannot change tip amount.',
+              status: 'already_charged'
+            }, { status: 400 })
+          }
         }
         
         const paymentIntent = await stripe.paymentIntents.create({
@@ -299,6 +388,17 @@ export async function POST(request: NextRequest) {
           return_url: `${process.env.NEXT_PUBLIC_APP_URL}/`,
           metadata: rideId ? { rideId, type: 'tip' } : { type: 'tip' }
         })
+        
+        // Store tip info in ride record
+        if (rideId && paymentIntent.status === 'succeeded') {
+          await supabase
+            .from('rides')
+            .update({ 
+              tip_amount: finalAmountCents / 100,
+              tip_payment_id: paymentIntent.id
+            })
+            .eq('id', rideId)
+        }
 
         return NextResponse.json({ status: paymentIntent.status })
       }

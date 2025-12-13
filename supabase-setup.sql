@@ -90,6 +90,9 @@ create table if not exists public.rides (
   payment_intent_id text,
   payment_status text,
   paid_amount numeric,
+  -- Tip tracking (prevents double-charging)
+  tip_amount numeric,
+  tip_payment_id text,
   -- Scheduling and preferences
   scheduled_for timestamptz null,
   is_scheduled boolean default false,

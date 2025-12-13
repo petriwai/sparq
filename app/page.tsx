@@ -73,6 +73,7 @@ export default function Home() {
   const [rideTimer, setRideTimer] = useState(0)
   const [rideFare, setRideFare] = useState(0)
   const [tipAmount, setTipAmount] = useState(0)
+  const [tipCharged, setTipCharged] = useState(false)
   const [currentRideId, setCurrentRideId] = useState<string | null>(null)
   const [showMenu, setShowMenu] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
@@ -145,17 +146,24 @@ export default function Home() {
     stopDriverSearch()
     if (currentRideId) {
       try {
+        // Cancel the payment authorization (release hold on card)
+        await stripeApi('cancel-payment-intent', { rideId: currentRideId })
+      } catch {
+        // Ignore payment cancel errors
+      }
+      try {
         await supabase
           .from('rides')
           .update({ status: 'cancelled' })
           .eq('id', currentRideId)
       } catch {
-        // Ignore cancel errors
+        // Ignore ride cancel errors
       }
     }
     setCurrentRideId(null)
     setRideFare(0)
     setTipAmount(0)
+    setTipCharged(false)
     setRideTimer(0)
     setLiveETA('')
     setDestination(null)
@@ -694,21 +702,33 @@ export default function Home() {
   }
 
   const handleAddTip = async (tip: number) => {
+    // If tip already charged, don't allow changes (prevents double-charge)
+    if (tipCharged && tip !== tipAmount) {
+      return
+    }
+    
     setTipAmount(tip)
     const tipCents = Math.round(tip * 100)
-    if (tip > 0 && currentRideId && selectedPaymentMethod) {
-      await stripeApi('charge-tip', { 
+    
+    // Only charge if there's a tip and we haven't charged yet
+    if (tip > 0 && currentRideId && selectedPaymentMethod && !tipCharged) {
+      const result = await stripeApi('charge-tip', { 
         customerId: stripeCustomerId, 
         amount: tip,           // compatibility
         amountCents: tipCents, // preferred
         paymentMethodId: selectedPaymentMethod,
         rideId: currentRideId,
       })
+      
+      // Mark tip as charged if successful
+      if (result?.status === 'succeeded' || result?.status === 'already_charged') {
+        setTipCharged(true)
+      }
     }
   }
 
   const handleFinishRide = () => {
-    setScreen('home'); setDestination(null); setDestinationInput(''); setCurrentRideId(null); setTipAmount(0); setRideTimer(0); setLiveETA('')
+    setScreen('home'); setDestination(null); setDestinationInput(''); setCurrentRideId(null); setTipAmount(0); setTipCharged(false); setRideTimer(0); setLiveETA('')
     setQuietRide(false); setPetFriendly(false); setIsScheduled(false); setScheduledTime('')
     setChatMessages([]); setShowChat(false); setUnreadCount(0)
     if (directionsRendererRef.current) directionsRendererRef.current.setDirections({ routes: [] } as unknown as google.maps.DirectionsResult)
@@ -1424,8 +1444,8 @@ export default function Home() {
         <div className="w-full max-w-sm glass-card rounded-2xl p-6 mb-6">
           <div className="text-center mb-6"><p className="text-slate-400 text-sm mb-1">Ride Fare</p><p className="text-5xl font-black text-amber-400" style={{ textShadow: '0 0 30px rgba(245, 158, 11, 0.4)' }}>${rideFare.toFixed(2)}</p></div>
           <div className="border-t border-slate-700/50 pt-4 mb-4">
-            <p className="text-slate-400 text-sm mb-3">Add a tip for {driverInfo.name}</p>
-            <div className="flex gap-2">{[0, 2, 5, 10].map(tip => (<button key={tip} onClick={() => handleAddTip(tip)} className={`flex-1 py-3 rounded-xl font-bold transition-all ${tipAmount === tip ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>{tip === 0 ? 'None' : `$${tip}`}</button>))}</div>
+            <p className="text-slate-400 text-sm mb-3">{tipCharged ? `Tip added for ${driverInfo.name} ✓` : `Add a tip for ${driverInfo.name}`}</p>
+            <div className="flex gap-2">{[0, 2, 5, 10].map(tip => (<button key={tip} onClick={() => handleAddTip(tip)} disabled={tipCharged && tip !== tipAmount} className={`flex-1 py-3 rounded-xl font-bold transition-all ${tipAmount === tip ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'} ${tipCharged && tip !== tipAmount ? 'opacity-50 cursor-not-allowed' : ''}`}>{tip === 0 ? 'None' : `$${tip}`}</button>))}</div>
           </div>
           <div className="flex justify-between items-center pt-4 border-t border-slate-700/50"><span className="text-white font-semibold">Total</span><span className="text-amber-400 font-black text-2xl">${(rideFare + tipAmount).toFixed(2)}</span></div>
         </div>
