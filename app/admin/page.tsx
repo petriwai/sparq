@@ -17,12 +17,24 @@ type Stats = {
   flaggedMessages: number
 }
 
-// Timeout wrapper to prevent hanging promises
-const withTimeout = <T,>(p: Promise<T>, ms = 5000): Promise<T> =>
-  Promise.race([
-    p,
-    new Promise<T>((_, rej) => setTimeout(() => rej(new Error('Request timed out')), ms))
-  ])
+// Timeout wrapper to prevent hanging promises (properly typed)
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms = 5000,
+  label = 'Operation'
+): Promise<T> {
+  let id: ReturnType<typeof setTimeout> | undefined
+
+  const timeout = new Promise<never>((_, reject) => {
+    id = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`))
+    }, ms)
+  })
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (id) clearTimeout(id)
+  }) as Promise<T>
+}
 
 export default function AdminPage() {
   const [user, setUser] = useState<User | null>(null)
@@ -84,14 +96,11 @@ export default function AdminPage() {
         debug.push(`User ID: ${currentUser.id}`)
         debug.push('Fetching profile role...')
         
-        const { data: profile, error: profileError } = await withTimeout(
-          supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', currentUser.id)
-            .single(),
-          5000
-        )
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', currentUser.id)
+          .single()
         
         // Check mounted again after await
         if (!mounted) return
