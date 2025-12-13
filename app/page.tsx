@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase, createRideRequest, cancelRide } from '@/lib/supabase'
+import { sendText, markRead, getMessages, subscribeToMessages, broadcastTyping, type ChatMessage as DBChatMessage } from '@/lib/chat'
 import type { User } from '@supabase/supabase-js'
 import confetti from 'canvas-confetti'
 
@@ -12,6 +13,14 @@ type SearchResult = { lat: number; lng: number; formatted_address: string; name?
 type RideOption = { id: string; name: string; icon: string; description: string; multiplier: number; eta: string }
 type SavedPlace = { id: string; label: string; icon: string; address: string; lat: number; lng: number }
 type PaymentMethod = { id: string; brand: string; last4: string; exp_month: number; exp_year: number }
+type ChatMessage = { 
+  id: string
+  sender: 'rider' | 'driver'
+  text: string
+  timestamp: Date
+  status: 'sending' | 'sent' | 'delivered' | 'read'
+  reaction?: string
+}
 
 const RIDE_OPTIONS: RideOption[] = [
   { id: 'saver', name: 'Inoka Saver', icon: '🚗', description: 'Affordable rides', multiplier: 0.8, eta: '5-10' },
@@ -80,6 +89,14 @@ export default function Home() {
   const [loadingPlaces, setLoadingPlaces] = useState(true)
   const [loadingPayments, setLoadingPayments] = useState(true)
   const [mapError, setMapError] = useState<string | null>(null)
+  
+  // Chat state
+  const [showChat, setShowChat] = useState(false)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [isTyping, setIsTyping] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
+  const chatEndRef = useRef<HTMLDivElement>(null)
 
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstanceRef = useRef<google.maps.Map | null>(null)
@@ -92,7 +109,7 @@ export default function Home() {
   const animationFrameRef = useRef<number | null>(null)
   const hapticIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
-  const [driverInfo] = useState({ name: 'Marcus T.', rating: 4.9, car: 'White Toyota Camry', plate: 'IL-7829', photo: '👨‍✈️', eta: 3 })
+  const [driverInfo] = useState({ name: 'Marcus T.', rating: 4.9, car: 'White Toyota Camry', plate: 'IL-7829', photo: '👨‍✈️', eta: 3, phone: '+12175551234' })
 
   // Auth listener
   useEffect(() => {
@@ -499,10 +516,184 @@ export default function Home() {
   const handleFinishRide = () => {
     setScreen('home'); setDestination(null); setDestinationInput(''); setCurrentRideId(null); setTipAmount(0); setRideTimer(0); setLiveETA('')
     setQuietRide(false); setPetFriendly(false); setIsScheduled(false); setScheduledTime('')
+    setChatMessages([]); setShowChat(false); setUnreadCount(0)
     if (directionsRendererRef.current) directionsRendererRef.current.setDirections({ routes: [] } as unknown as google.maps.DirectionsResult)
     if (carMarkerRef.current) { carMarkerRef.current.setMap(null); carMarkerRef.current = null }
     if (destMarkerRef.current) { destMarkerRef.current.setMap(null); destMarkerRef.current = null }
     routePathRef.current = []
+  }
+
+  // --- CHAT FUNCTIONS ---
+  const scrollToBottom = () => {
+    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+  }
+
+  // Subscribe to real messages when we have a ride
+  const chatChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  
+  useEffect(() => {
+    if (!currentRideId || !showChat) return
+    
+    // Load existing messages
+    getMessages(currentRideId).then(msgs => {
+      if (msgs.length > 0) {
+        const converted: ChatMessage[] = msgs.map(m => ({
+          id: m.id,
+          sender: m.sender_id === user?.id ? 'rider' : 'driver',
+          text: m.content,
+          timestamp: new Date(m.created_at),
+          status: m.read_at ? 'read' : 'delivered'
+        }))
+        setChatMessages(converted)
+        markRead(currentRideId)
+        scrollToBottom()
+      }
+    }).catch(console.error)
+    
+    // Subscribe to new messages
+    const channel = subscribeToMessages(
+      currentRideId,
+      (msg) => {
+        const converted: ChatMessage = {
+          id: msg.id,
+          sender: msg.sender_id === user?.id ? 'rider' : 'driver',
+          text: msg.content,
+          timestamp: new Date(msg.created_at),
+          status: msg.read_at ? 'read' : 'delivered'
+        }
+        setChatMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, converted])
+        markRead(currentRideId)
+        scrollToBottom()
+        if (!showChat && msg.sender_id !== user?.id) {
+          setUnreadCount(prev => prev + 1)
+          if (navigator.vibrate) navigator.vibrate(50)
+        }
+      },
+      () => {
+        setIsTyping(true)
+        setTimeout(() => setIsTyping(false), 1500)
+      }
+    )
+    chatChannelRef.current = channel
+    
+    return () => {
+      if (chatChannelRef.current) {
+        supabase.removeChannel(chatChannelRef.current)
+        chatChannelRef.current = null
+      }
+    }
+  }, [currentRideId, showChat, user?.id])
+
+  const sendMessage = async () => {
+    if (!chatInput.trim()) return
+    
+    const messageText = chatInput.trim()
+    setChatInput('')
+    
+    // Optimistic UI update
+    const tempId = Date.now().toString()
+    const newMessage: ChatMessage = {
+      id: tempId,
+      sender: 'rider',
+      text: messageText,
+      timestamp: new Date(),
+      status: 'sending'
+    }
+    
+    setChatMessages(prev => [...prev, newMessage])
+    scrollToBottom()
+    
+    // If we have a real ride, send to Supabase
+    if (currentRideId) {
+      try {
+        await sendText(currentRideId, messageText)
+        // Broadcast typing stopped
+        if (chatChannelRef.current) {
+          broadcastTyping(chatChannelRef.current)
+        }
+        setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'sent' } : m))
+        setTimeout(() => {
+          setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'delivered' } : m))
+        }, 500)
+      } catch (err) {
+        console.error('Failed to send message:', err)
+        setChatMessages(prev => prev.filter(m => m.id !== tempId))
+      }
+    } else {
+      // Demo mode - simulate responses
+      setTimeout(() => {
+        setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'sent' } : m))
+      }, 300)
+      setTimeout(() => {
+        setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'delivered' } : m))
+      }, 800)
+      setTimeout(() => {
+        setChatMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'read' } : m))
+      }, 1500)
+      simulateDriverResponse(messageText)
+    }
+  }
+
+  const handleTyping = () => {
+    if (currentRideId && chatChannelRef.current) {
+      broadcastTyping(chatChannelRef.current)
+    }
+  }
+
+  const simulateDriverResponse = (userMessage: string) => {
+    // Show typing indicator
+    setTimeout(() => setIsTyping(true), 1000)
+    
+    // Generate contextual response
+    const responses: Record<string, string> = {
+      'where': "I'm about 2 minutes away, on Washington St!",
+      'here': "Great, pulling up now! Look for the white Camry.",
+      'wait': "No problem, take your time! I'll wait.",
+      'thanks': "You're welcome! See you soon 👋",
+      'hello': "Hey there! On my way to you now.",
+      'hi': "Hi! I should be there in just a couple minutes.",
+      'late': "Traffic is light, I'll be there right on time!",
+      'help': "What do you need help with? I'm here!",
+    }
+    
+    let response = "Got it! I'll be there shortly."
+    const lowerMessage = userMessage.toLowerCase()
+    for (const [key, value] of Object.entries(responses)) {
+      if (lowerMessage.includes(key)) { response = value; break }
+    }
+    
+    // Send driver response
+    setTimeout(() => {
+      setIsTyping(false)
+      const driverMessage: ChatMessage = {
+        id: Date.now().toString(),
+        sender: 'driver',
+        text: response,
+        timestamp: new Date(),
+        status: 'read'
+      }
+      setChatMessages(prev => [...prev, driverMessage])
+      scrollToBottom()
+      
+      // Increment unread if chat is closed
+      if (!showChat) setUnreadCount(prev => prev + 1)
+      
+      // Haptic feedback
+      if (navigator.vibrate) navigator.vibrate(50)
+    }, 2500)
+  }
+
+  const formatMessageTime = (date: Date) => {
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  }
+
+  const openChat = async () => {
+    setShowChat(true)
+    setUnreadCount(0)
+    if (currentRideId) {
+      await markRead(currentRideId).catch(console.error)
+    }
+    scrollToBottom()
   }
 
   const handleSignIn = async () => { setAuthLoading(true); setAuthError(''); const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword }); if (error) setAuthError(error.message); else { setScreen('home'); setAuthEmail(''); setAuthPassword('') }; setAuthLoading(false) }
@@ -514,6 +705,344 @@ export default function Home() {
     if (!user || !destination || !newPlaceLabel.trim()) return
     await supabase.from('saved_places').insert({ user_id: user.id, label: newPlaceLabel, icon: newPlaceIcon, address: destination.address, lat: destination.lat, lng: destination.lng })
     loadSavedPlaces(user.id); setNewPlaceLabel(''); setNewPlaceIcon('📍'); setScreen('home')
+  }
+
+  // --- ULTRA-PREMIUM CHAT COMPONENT ---
+  const ChatModal = () => {
+    const [selectedMessage, setSelectedMessage] = useState<string | null>(null)
+    const [showReactions, setShowReactions] = useState(false)
+    const [isRecording, setIsRecording] = useState(false)
+    
+    const reactions = ['❤️', '😂', '👍', '😮', '😢', '🔥']
+    
+    const addReaction = (messageId: string, emoji: string) => {
+      setChatMessages(prev => prev.map(m => 
+        m.id === messageId ? { ...m, reaction: emoji } : m
+      ))
+      setShowReactions(false)
+      setSelectedMessage(null)
+      if (navigator.vibrate) navigator.vibrate(30)
+    }
+    
+    return (
+      <div className={`fixed inset-0 z-[100] transition-all duration-500 ease-out ${showChat ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+        {/* Animated Backdrop with blur */}
+        <div 
+          className={`absolute inset-0 bg-black/70 backdrop-blur-xl transition-opacity duration-500 ${showChat ? 'opacity-100' : 'opacity-0'}`} 
+          onClick={() => setShowChat(false)} 
+        />
+        
+        {/* Ambient glow effect */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className={`absolute -top-40 -right-40 w-80 h-80 bg-amber-500/20 rounded-full blur-3xl transition-transform duration-1000 ${showChat ? 'scale-100' : 'scale-0'}`} />
+          <div className={`absolute -bottom-40 -left-40 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl transition-transform duration-1000 delay-200 ${showChat ? 'scale-100' : 'scale-0'}`} />
+        </div>
+        
+        {/* Chat Container */}
+        <div className={`absolute inset-x-0 bottom-0 max-h-[92vh] flex flex-col transition-all duration-500 ease-out ${showChat ? 'translate-y-0' : 'translate-y-full'}`}>
+          {/* Glass Container */}
+          <div className="mx-2 mb-2 rounded-[28px] bg-gradient-to-b from-slate-800/95 via-slate-900/98 to-slate-950 backdrop-blur-2xl border border-white/10 shadow-2xl shadow-black/50 flex flex-col overflow-hidden">
+            
+            {/* Premium Header */}
+            <div className="relative px-5 py-4 border-b border-white/5">
+              {/* Subtle header gradient */}
+              <div className="absolute inset-0 bg-gradient-to-r from-amber-500/5 via-transparent to-blue-500/5" />
+              
+              <div className="relative flex items-center gap-4">
+                {/* Avatar with pulse ring */}
+                <div className="relative">
+                  <div className="absolute -inset-1 bg-gradient-to-r from-amber-400 to-amber-600 rounded-2xl opacity-75 blur animate-pulse" />
+                  <div className="relative w-14 h-14 bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600 rounded-2xl flex items-center justify-center text-2xl shadow-lg">
+                    {driverInfo.photo}
+                  </div>
+                  {/* Online indicator with pulse */}
+                  <div className="absolute -bottom-0.5 -right-0.5">
+                    <div className="absolute inset-0 w-4 h-4 bg-emerald-400 rounded-full animate-ping opacity-75" />
+                    <div className="relative w-4 h-4 bg-emerald-500 rounded-full border-2 border-slate-900" />
+                  </div>
+                </div>
+                
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-white font-bold text-lg">{driverInfo.name}</h3>
+                    <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs font-medium rounded-full">Online</span>
+                  </div>
+                  <p className="text-slate-400 text-sm flex items-center gap-2 truncate">
+                    <span className="text-amber-400 flex items-center gap-0.5">
+                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                      {driverInfo.rating}
+                    </span>
+                    <span className="text-slate-600">•</span>
+                    <span className="truncate">{driverInfo.car}</span>
+                  </p>
+                </div>
+                
+                {/* Action buttons */}
+                <div className="flex gap-2">
+                  <a href={`tel:${driverInfo.phone}`} className="w-11 h-11 bg-emerald-500/20 hover:bg-emerald-500/30 rounded-xl flex items-center justify-center transition-all hover:scale-105 active:scale-95">
+                    <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                    </svg>
+                  </a>
+                  <button onClick={() => setShowChat(false)} className="w-11 h-11 bg-white/5 hover:bg-white/10 rounded-xl flex items-center justify-center transition-all hover:scale-105 active:scale-95">
+                    <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            {/* Messages Area */}
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-[320px] max-h-[55vh] scroll-smooth">
+              {/* Empty State */}
+              {chatMessages.length === 0 && (
+                <div className="text-center py-16 animate-fade-in">
+                  <div className="relative w-24 h-24 mx-auto mb-6">
+                    <div className="absolute inset-0 bg-gradient-to-br from-amber-400/20 to-orange-500/20 rounded-3xl blur-xl" />
+                    <div className="relative w-24 h-24 bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl flex items-center justify-center border border-white/10">
+                      <span className="text-5xl">💬</span>
+                    </div>
+                  </div>
+                  <p className="text-white font-semibold text-lg mb-2">Start the conversation</p>
+                  <p className="text-slate-500 text-sm max-w-[200px] mx-auto">Send a message to coordinate your pickup</p>
+                </div>
+              )}
+              
+              {/* Messages */}
+              {chatMessages.map((msg, idx) => {
+                const isOwn = msg.sender === 'rider'
+                const showAvatar = !isOwn && (idx === 0 || chatMessages[idx - 1]?.sender !== 'driver')
+                
+                return (
+                  <div 
+                    key={msg.id} 
+                    className={`flex ${isOwn ? 'justify-end' : 'justify-start'} group`}
+                    style={{ animation: 'messageSlide 0.4s cubic-bezier(0.16, 1, 0.3, 1)' }}
+                  >
+                    {/* Driver Avatar */}
+                    {!isOwn && (
+                      <div className={`w-8 mr-2 flex-shrink-0 ${showAvatar ? '' : 'opacity-0'}`}>
+                        <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-amber-600 rounded-xl flex items-center justify-center text-sm shadow-lg shadow-amber-500/20">
+                          {driverInfo.photo}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Message Bubble */}
+                    <div 
+                      className={`relative max-w-[75%] ${isOwn ? 'order-1' : ''}`}
+                      onContextMenu={(e) => { e.preventDefault(); setSelectedMessage(msg.id); setShowReactions(true) }}
+                      onClick={() => { if (selectedMessage === msg.id) { setSelectedMessage(null); setShowReactions(false) } }}
+                    >
+                      {/* Reactions popup */}
+                      {selectedMessage === msg.id && showReactions && (
+                        <div className={`absolute ${isOwn ? 'right-0' : 'left-0'} -top-12 z-10 animate-scale-in`}>
+                          <div className="flex gap-1 p-2 bg-slate-800 rounded-2xl border border-white/10 shadow-xl">
+                            {reactions.map(emoji => (
+                              <button 
+                                key={emoji} 
+                                onClick={(e) => { e.stopPropagation(); addReaction(msg.id, emoji) }}
+                                className="w-9 h-9 hover:bg-white/10 rounded-xl flex items-center justify-center text-lg transition-transform hover:scale-125"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className={`px-4 py-3 rounded-2xl ${
+                        isOwn 
+                          ? 'bg-gradient-to-br from-amber-500 to-amber-600 text-white rounded-tr-sm shadow-lg shadow-amber-500/20' 
+                          : 'bg-slate-800/80 text-white rounded-tl-sm border border-white/5'
+                      }`}>
+                        <p className="text-[15px] leading-relaxed">{msg.text}</p>
+                      </div>
+                      
+                      {/* Reaction badge */}
+                      {(msg as any).reaction && (
+                        <div className={`absolute -bottom-2 ${isOwn ? 'left-2' : 'right-2'} px-1.5 py-0.5 bg-slate-800 rounded-full border border-white/10 text-sm shadow-lg`}>
+                          {(msg as any).reaction}
+                        </div>
+                      )}
+                      
+                      {/* Timestamp & Status */}
+                      <div className={`flex items-center gap-1.5 mt-1.5 px-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                        <span className="text-slate-500 text-[11px]">{formatMessageTime(msg.timestamp)}</span>
+                        {isOwn && (
+                          <span className="text-xs flex items-center">
+                            {msg.status === 'sending' && (
+                              <svg className="w-3.5 h-3.5 text-slate-500 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+                                <circle cx="10" cy="10" r="3" />
+                              </svg>
+                            )}
+                            {msg.status === 'sent' && (
+                              <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                            {msg.status === 'delivered' && (
+                              <div className="flex -space-x-1.5">
+                                <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                </svg>
+                                <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                </svg>
+                              </div>
+                            )}
+                            {msg.status === 'read' && (
+                              <div className="flex -space-x-1.5">
+                                <svg className="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                </svg>
+                                <svg className="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                </svg>
+                              </div>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+              
+              {/* Typing Indicator */}
+              {isTyping && (
+                <div className="flex justify-start" style={{ animation: 'messageSlide 0.4s cubic-bezier(0.16, 1, 0.3, 1)' }}>
+                  <div className="w-8 mr-2 flex-shrink-0">
+                    <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-amber-600 rounded-xl flex items-center justify-center text-sm">
+                      {driverInfo.photo}
+                    </div>
+                  </div>
+                  <div className="bg-slate-800/80 border border-white/5 px-4 py-3 rounded-2xl rounded-tl-sm">
+                    <div className="flex gap-1">
+                      <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '0.6s' }} />
+                      <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms', animationDuration: '0.6s' }} />
+                      <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms', animationDuration: '0.6s' }} />
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <div ref={chatEndRef} />
+            </div>
+            
+            {/* Quick Replies with horizontal scroll */}
+            <div className="px-4 py-3 border-t border-white/5 bg-slate-900/50">
+              <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar">
+                {["I'm outside 📍", "On my way down ⏳", "2 min! 🏃", "Where exactly? 🤔", "Thanks! 🙏"].map((text, i) => (
+                  <button
+                    key={text}
+                    onClick={() => setChatInput(text.replace(/[^\w\s'!?]/g, '').trim())}
+                    className="flex-shrink-0 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-amber-500/30 rounded-full text-sm text-slate-300 transition-all hover:scale-105 active:scale-95"
+                    style={{ animation: `fadeSlideUp 0.4s ease-out ${i * 50}ms both` }}
+                  >
+                    {text}
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            {/* Premium Input Area */}
+            <div className="px-4 pb-6 pt-3 bg-gradient-to-t from-slate-950 to-transparent">
+              <div className="flex items-center gap-3">
+                {/* Voice Message Button */}
+                <button 
+                  onMouseDown={() => setIsRecording(true)}
+                  onMouseUp={() => setIsRecording(false)}
+                  onMouseLeave={() => setIsRecording(false)}
+                  className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all ${
+                    isRecording 
+                      ? 'bg-red-500 scale-110 shadow-lg shadow-red-500/30' 
+                      : 'bg-white/5 hover:bg-white/10'
+                  }`}
+                >
+                  <svg className={`w-5 h-5 ${isRecording ? 'text-white animate-pulse' : 'text-slate-400'}`} fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+                  </svg>
+                </button>
+                
+                {/* Input Field */}
+                <div className="flex-1 relative">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => { setChatInput(e.target.value); handleTyping() }}
+                    onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                    placeholder="Message..."
+                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50 focus:bg-white/10 focus:ring-2 focus:ring-amber-500/20 transition-all"
+                  />
+                </div>
+                
+                {/* Send Button with glow */}
+                <button
+                  onClick={sendMessage}
+                  disabled={!chatInput.trim()}
+                  className="relative w-12 h-12 group"
+                >
+                  <div className={`absolute inset-0 bg-gradient-to-r from-amber-500 to-orange-500 rounded-xl blur transition-opacity ${chatInput.trim() ? 'opacity-50 group-hover:opacity-75' : 'opacity-0'}`} />
+                  <div className={`relative w-full h-full bg-gradient-to-r from-amber-500 to-amber-600 rounded-xl flex items-center justify-center transition-all ${
+                    chatInput.trim() 
+                      ? 'opacity-100 hover:from-amber-600 hover:to-orange-600 active:scale-95' 
+                      : 'opacity-40'
+                  }`}>
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                  </div>
+                </button>
+              </div>
+              
+              {/* Recording indicator */}
+              {isRecording && (
+                <div className="mt-3 flex items-center justify-center gap-2 text-red-400 animate-pulse">
+                  <div className="w-2 h-2 bg-red-500 rounded-full" />
+                  <span className="text-sm font-medium">Recording... Release to send</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // --- FLOATING CHAT BUTTON ---
+  const ChatButton = () => {
+    if (screen !== 'found' && screen !== 'in-ride') return null
+    
+    return (
+      <button
+        onClick={openChat}
+        className="fixed bottom-[calc(45vh+24px)] right-5 z-50 group"
+        style={{ animation: 'scaleIn 0.5s cubic-bezier(0.16, 1, 0.3, 1)' }}
+      >
+        {/* Glow effect */}
+        <div className="absolute inset-0 bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl blur-lg opacity-50 group-hover:opacity-75 transition-opacity" />
+        
+        {/* Button */}
+        <div className="relative w-16 h-16 bg-gradient-to-br from-amber-500 via-amber-600 to-orange-600 rounded-2xl flex items-center justify-center shadow-xl shadow-amber-500/30 group-hover:shadow-amber-500/40 transition-all group-hover:scale-105 active:scale-95">
+          <span className="text-2xl">💬</span>
+          
+          {/* Ripple effect */}
+          <div className="absolute inset-0 rounded-2xl bg-white/20 opacity-0 group-hover:opacity-100 group-hover:animate-ping" />
+        </div>
+        
+        {/* Unread Badge */}
+        {unreadCount > 0 && (
+          <div className="absolute -top-2 -right-2 min-w-[24px] h-6 px-2 bg-red-500 rounded-full flex items-center justify-center shadow-lg shadow-red-500/50 animate-bounce">
+            <span className="text-white text-xs font-bold">{unreadCount}</span>
+          </div>
+        )}
+      </button>
+    )
   }
 
   const Header = () => (
@@ -652,6 +1181,12 @@ export default function Home() {
 
   return (
     <div className="h-screen flex flex-col bg-slate-900 overflow-hidden relative">
+      {/* Chat Modal */}
+      <ChatModal />
+      
+      {/* Floating Chat Button */}
+      <ChatButton />
+      
       {/* Absolute Header Overlay */}
       <Header />
       
@@ -748,7 +1283,7 @@ export default function Home() {
               <div className="flex items-center gap-4"><div className="w-16 h-16 bg-slate-700 rounded-full flex items-center justify-center text-3xl">{driverInfo.photo}</div><div className="flex-1"><p className="text-white font-semibold text-lg">{driverInfo.name}</p><div className="flex items-center gap-1 text-amber-400 text-sm"><span>⭐</span><span>{driverInfo.rating}</span></div></div><div className="text-right"><p className="text-3xl font-bold text-amber-400">{driverInfo.eta}</p><p className="text-slate-400 text-sm">min</p></div></div>
               <div className="mt-4 pt-4 border-t border-slate-600/50"><p className="text-slate-400 text-sm">{driverInfo.car}</p><p className="text-white font-mono text-lg">{driverInfo.plate}</p></div>
             </div>
-            <div className="flex gap-3 mb-4"><button className="flex-1 py-3 glass-card hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2"><span>📞</span> Call</button><button className="flex-1 py-3 glass-card hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2"><span>💬</span> Message</button></div>
+            <div className="flex gap-3 mb-4"><a href={`tel:${driverInfo.phone}`} className="flex-1 py-3 glass-card hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2"><span>📞</span> Call</a><button onClick={openChat} className="flex-1 py-3 glass-card hover:bg-slate-700/50 text-white rounded-xl flex items-center justify-center gap-2 relative"><span>💬</span> Message{unreadCount > 0 && <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center">{unreadCount}</span>}</button></div>
             <p className="text-center text-slate-400 text-sm mb-4">Your driver will start the trip when you're picked up</p>
             <button onClick={() => { if (currentRideId) cancelRide(currentRideId); setScreen('home') }} className="w-full py-3 glass-card hover:bg-slate-700/50 text-slate-300 rounded-xl">Cancel Ride</button>
             {/* Demo: Simulate driver starting the ride */}

@@ -170,6 +170,81 @@ revoke update on table public.drivers from anon, authenticated;
 grant update (name, license_number) on table public.drivers to authenticated;
 
 -- ============================================================================
+-- MESSAGES TABLE (Premium Chat with Voice Support)
+-- ============================================================================
+create table if not exists public.messages (
+  id uuid primary key default gen_random_uuid(),
+  ride_id uuid not null references public.rides(id) on delete cascade,
+  sender_id uuid not null references auth.users(id),
+  message_type text not null default 'text' check (message_type in ('text', 'voice')),
+  content text not null,
+  created_at timestamptz not null default now(),
+  read_at timestamptz null
+);
+
+-- Index for fast message retrieval
+create index if not exists messages_ride_created_idx
+  on public.messages (ride_id, created_at);
+
+alter table public.messages enable row level security;
+
+-- Select: only ride participants (rider OR driver)
+create policy "messages_select_participants"
+on public.messages for select
+using (
+  exists (
+    select 1 from public.rides r
+    where r.id = messages.ride_id
+      and (r.rider_id = auth.uid() or r.driver_id = auth.uid())
+  )
+);
+
+-- Insert: only participants, sender_id must be you
+create policy "messages_insert_participants"
+on public.messages for insert
+with check (
+  sender_id = auth.uid()
+  and exists (
+    select 1 from public.rides r
+    where r.id = messages.ride_id
+      and (r.rider_id = auth.uid() or r.driver_id = auth.uid())
+  )
+);
+
+-- No direct UPDATE from clients (use RPC for read receipts)
+revoke update on public.messages from authenticated;
+
+-- RPC to mark messages read (security definer)
+create or replace function public.mark_messages_read(p_ride_id uuid)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  update public.messages
+  set read_at = now()
+  where ride_id = p_ride_id
+    and sender_id <> auth.uid()
+    and read_at is null
+    and exists (
+      select 1 from public.rides r
+      where r.id = p_ride_id
+        and (r.rider_id = auth.uid() or r.driver_id = auth.uid())
+    );
+end;
+$$;
+
+grant execute on function public.mark_messages_read(uuid) to authenticated;
+
+-- Enable Realtime for messages
+alter publication supabase_realtime add table messages;
+
+-- ============================================================================
+-- ADD DRIVER_ID TO RIDES (for chat participant lookup)
+-- ============================================================================
+alter table public.rides add column if not exists driver_id uuid references auth.users(id) null;
+
+-- ============================================================================
 -- MIGRATION: Add new columns to existing rides table
 -- ============================================================================
 -- Run these if upgrading an existing database:
